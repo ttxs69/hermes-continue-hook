@@ -39,7 +39,8 @@
     "test:dsh": "node tests/test_dsh.mjs",
     "lint": "ruff check . && ruff format --check .",
     "typecheck": "mypy detector.py hookctl.py __init__.py adapters/_common.py",
-    "check": "./scripts/check.sh"
+    "check": "./scripts/check.sh",
+    "prepack": "node scripts/clean-pack.mjs"
   },
   "repository": {
     "type": "git",

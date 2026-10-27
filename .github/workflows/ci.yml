@@ -99,3 +99,11 @@ jobs:
           echo "$files" | grep -q "detector.py"
           echo "$files" | grep -q "skills/continue-hook/SKILL.md"
           echo "$files" | grep -q "adapters/claude-code/stop_hook.py"
+          echo "$files" | grep -q "adapters/opencode/continue-hook.js"
+          echo "$files" | grep -q "adapters/pi/continue-hook.ts"
+          echo "$files" | grep -q "adapters/dsh/src/index.ts"
+          # no build artefacts may ship
+          if echo "$files" | grep -qE "__pycache__|\.pyc$"; then
+            echo "::error::the tarball contains build artefacts"
+            exit 1
+          fi

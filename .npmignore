@@ -1,0 +1,21 @@
+# Build artefacts must never ship in the npm tarball.
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Repository-only material
+.git/
+.github/
+tests/
+scripts/
+docs/
+patch-mode/
+agent-hooks/
+CONTRIBUTING.md
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+QWEN.md
