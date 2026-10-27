@@ -24,6 +24,12 @@ _QUOTE_RE = re.compile(
     r"「[^」]{0,80}」|『[^』]{0,80}』|\u201c[^\u201d]{0,80}\u201d|'[^']{0,60}'"
 )
 
+# A question mark inside a URL is not a question. Without this, a reply that
+# ends with a link ("docs at https://example.com/x?y=1") looked like a
+# permission-seeking ending.
+_URL_RE = re.compile(r"https?://[^\s<>）)\]\"']+")
+_MARKDOWN_LINK_RE = re.compile(r"\]\([^)]*\)")
+
 NUDGE_TEMPLATE = (
     "【continue-hook】Your last reply ended by asking the user a question.\n"
     "Self-check once, per standing discipline:\n"
@@ -155,10 +161,14 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
         return False, "user_must"
     tr = cfg.get("triggers", {})
     trig_tail = _QUOTE_RE.sub("", tail)  # quoted mentions are not asks
+    # URLs and markdown link targets are stripped before the bare-question-mark
+    # trigger: a "?" inside a link is not a question.
+    no_urls = _MARKDOWN_LINK_RE.sub(" ", trig_tail)
+    no_urls = _URL_RE.sub(" ", no_urls)
     for name in ("offer", "hand_off", "confirm_seek"):
         if _compile(tr.get(name)).search(trig_tail):
             return True, f"trigger:{name}"
-    if tr.get("question_mark", True) and re.search(r"[？?]", trig_tail):
+    if tr.get("question_mark", True) and re.search(r"[？?]", no_urls):
         return True, "trigger:question_mark"
     return False, "no_trigger"
 

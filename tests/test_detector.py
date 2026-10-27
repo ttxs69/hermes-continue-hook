@@ -143,5 +143,24 @@ class TestNudge(unittest.TestCase):
         self.assertIn("#2", build_nudge(1))
 
 
+
+    def test_url_with_query_string_is_not_a_question(self):
+        """A "?" inside a link is not a permission-seeking ending."""
+        cfg = default_config()
+        for text in (
+            "全部改好了。文档地址 https://example.com/docs?foo=bar",
+            "见 [文档](https://example.com/x?y=1) 这份",
+            "看这里 https://example.com/a?",
+        ):
+            should, reason = detect(text, 0, cfg)
+            self.assertFalse(should, f"{text!r} should not trigger ({reason})")
+
+    def test_question_after_a_url_still_triggers(self):
+        """Stripping the URL must not swallow a real question after it."""
+        cfg = default_config()
+        should, reason = detect("文档 https://example.com/a?x=1 还需要我做什么？", 0, cfg)
+        self.assertTrue(should)
+        self.assertTrue(reason.startswith("trigger:"))
+
 if __name__ == "__main__":
     unittest.main()
