@@ -1,0 +1,31 @@
+{
+  "name": "continue-hook-dsh",
+  "version": "1.3.0",
+  "description": "continue-hook for DeepSeek Harness (dsh): stop asking permission for things the agent should just do.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-agent": "latest",
+    "@deepseek-ai/dsh-llm": "latest",
+    "@deepseek-ai/dsh-session": "latest",
+    "@deepseek-ai/cordis": "latest"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

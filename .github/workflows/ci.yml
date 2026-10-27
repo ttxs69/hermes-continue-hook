@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: lint & types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tools
+        run: python -m pip install --upgrade pip ruff mypy
+      - name: ruff
+        run: ruff check .
+      - name: mypy
+        run: mypy
+
+  python:
+    name: python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -v
+
+  node:
+    name: node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["18", "20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: OpenCode plugin tests
+        run: node tests/test_opencode.mjs
+      - name: Installer tests
+        run: node tests/test_installer.mjs
+
+  dsh:
+    name: dsh plugin (typecheck + runtime)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Typecheck the dsh plugin against the real dsh packages
+        run: bash adapters/dsh/typecheck.sh
+      - name: Run the dsh plugin against a mock harness
+        run: node tests/test_dsh.mjs
+
+  package:
+    name: npm package contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Pack the tarball
+        run: npm pack --dry-run
+      - name: Check the tarball carries the runtime
+        run: |
+          set -euo pipefail
+          npm pack --json > pack.json
+          files=$(node -e "const p=require('./pack.json');console.log(p[0].files.map(f=>f.path).join('\n'))")
+          echo "$files" | grep -q "bin/continue-hook.js"
+          echo "$files" | grep -q "hookctl.py"
+          echo "$files" | grep -q "detector.py"
+          echo "$files" | grep -q "skills/continue-hook/SKILL.md"
+          echo "$files" | grep -q "adapters/claude-code/stop_hook.py"

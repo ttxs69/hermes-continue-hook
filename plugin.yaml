@@ -1,0 +1,12 @@
+name: continue-hook
+version: "1.3.0"
+provides_hooks:
+  - transform_llm_output
+  - on_session_end
+description: >
+  Stop asking, start doing. Detects permission-seeking endings
+  ("要不要我…？" / "should I…?") and nudges the agent to just do the work
+  itself. Judgment stays with the agent: real user-only boundaries
+  (money, identity, publishing, destructive actions) are re-asked briefly;
+  everything else gets done. Fully configurable triggers, dry-run mode,
+  full observability.

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "name": "continue-hook",
+  "displayName": "continue-hook",
+  "version": "1.3.0",
+  "description": "Stop asking permission for things the agent should just do.",
+  "homepage": "https://github.com/ttxs69/hermes-continue-hook",
+  "license": "MIT",
+  "compat": {
+    "source": "native",
+    "manifestDir": ".muse-plugin"
+  },
+  "capabilities": [
+    {
+      "id": "continue-hook",
+      "path": "skills/continue-hook/SKILL.md"
+    }
+  ]
+}

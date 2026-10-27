@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "continue-hook",
+            "type": "command",
+            "command": "python3 \"${GEMINI_PLUGIN_ROOT}/adapters/gemini/stop_hook.py\"",
+            "timeout": 30000
+          }
+        ]
+      }
+    ]
+  }
+}

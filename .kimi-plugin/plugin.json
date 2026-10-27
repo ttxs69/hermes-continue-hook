@@ -1,0 +1,8 @@
+{
+  "name": "continue-hook",
+  "version": "1.3.0",
+  "description": "Stop asking permission for things the agent should just do.",
+  "homepage": "https://github.com/ttxs69/hermes-continue-hook",
+  "license": "MIT",
+  "skills": "./skills/"
+}

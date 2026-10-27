@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "name": "continue-hook",
+            "type": "command",
+            "command": "python3 ~/.hermes/continue-hook/qwen/stop_hook.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

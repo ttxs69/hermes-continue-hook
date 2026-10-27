@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "python3 ~/.hermes/continue-hook/copilot/stop_hook.py",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}

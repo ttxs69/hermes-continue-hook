@@ -1,0 +1,53 @@
+diff --git a/agent/session_persistence.py b/agent/session_persistence.py
+index 92a5772a3b..409886c999 100644
+--- a/agent/session_persistence.py
++++ b/agent/session_persistence.py
+@@ -39,6 +39,7 @@ _EPHEMERAL_SCAFFOLDING_FLAGS = (
+     "_thinking_prefill",
+     "_verification_stop_synthetic",  # verify-on-stop nudge; the assistant candidate itself is NOT synthetic
+     "_pre_verify_synthetic",
++    "_continue_hook_synthetic",
+     "_kanban_stop_synthetic",  # kanban worker stop-guard
+     "_dropped_toolcall_nudge",  # internal retry instruction; must not replay as user context
+ )
+diff --git a/agent/turn_finalizer.py b/agent/turn_finalizer.py
+index 9fd39ec52d..82974ae09a 100644
+--- a/agent/turn_finalizer.py
++++ b/agent/turn_finalizer.py
+@@ -25,7 +25,7 @@ from agent.served_model import result_model_fields
+ # Verification-continuation nudges (verify-on-stop / pre_verify) must be stripped from
+ # returned/live history to avoid role-alternation breaks; the assistant response is
+ # real content and is not flagged. (#65919)
+-_VERIFICATION_CONTINUATION_FLAGS = ("_verification_stop_synthetic", "_pre_verify_synthetic")
++_VERIFICATION_CONTINUATION_FLAGS = ("_verification_stop_synthetic", "_pre_verify_synthetic", "_continue_hook_synthetic")
+ 
+ _SENTENCE_END = {".", "!", "?", "。", "！", "？", "`", ")"}
+ 
+diff --git a/agent/turn_stop_gates.py b/agent/turn_stop_gates.py
+index 9580c635d4..4b9584fc24 100644
+--- a/agent/turn_stop_gates.py
++++ b/agent/turn_stop_gates.py
+@@ -170,6 +170,23 @@ def apply_stop_gates(
+             "(kanban_complete/kanban_request_review/kanban_block) — nudging to finish"
+         )
+         return verdict
++
++    # continue-hook（R166 用户原创设计·本地 dogfood）：第一人称请示句收尾 ⇒ 注入 nudge 自判续跑
++    try:
++        from agent.continue_hook import continue_hook_nudge
++        _ch_nudge = continue_hook_nudge(agent, final_response)
++    except Exception:
++        _ch_nudge = None
++        logger.debug("continue-hook gate failed", exc_info=True)
++    if _ch_nudge:
++        final_msg["finish_reason"] = "continue_hook_nudge"
++        _append_interim_answer(
++            agent, final_msg, messages, conversation_history, "continue-hook interim flush failed"
++        )
++        verdict = _continue(_ch_nudge, "_continue_hook_synthetic")
++        logger.info("continue-hook nudge issued (attempt %d)", getattr(agent, "_continue_hook_nudges", 0))
++        return verdict
++
+     return StopGateVerdict(
+         continue_turn=False, final_response=final_response,
+         pending_verification_response=pending_verification_response,

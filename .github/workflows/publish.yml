@@ -1,0 +1,67 @@
+name: Publish
+
+# Publishing is tag-driven: push a vX.Y.Z tag whose name matches the version
+# in package.json, and this workflow publishes to npm with provenance.
+#
+# The publish step needs an npm token. Two supported ways:
+#   * Trusted publishing (OIDC) — create the package once with a token, then
+#     configure the trusted publisher on npmjs.com (repo, workflow filename,
+#     environment). No long-lived secret in this repository.
+#   * A plain automation token stored as the NPM_TOKEN repository secret.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "pack only, do not publish"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write   # required for npm provenance / trusted publishing
+
+jobs:
+  version-gate:
+    name: tag matches the package version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gate
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME}"
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match package.json version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: version-gate
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Verify the package on npm
+        run: npm view "${{ steps.gate.outputs.version }}" version
+        continue-on-error: true
+      - name: Install the package manager
+        run: npm install -g npm@latest
+      - name: Dry run
+        if: ${{ inputs.dry-run }}
+        run: npm publish --dry-run --access public
+      - name: Publish
+        if: ${{ inputs.dry-run != true }}
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,17 @@
+{
+  "description": "continue-hook — stop asking permission for things the agent should just do.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.hermes/continue-hook/codex/stop_hook.py",
+            "timeout": 30,
+            "statusMessage": "continue-hook: checking the reply ending"
+          }
+        ]
+      }
+    ]
+  }
+}

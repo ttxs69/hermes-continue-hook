@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "python3 \"${COPILOT_PLUGIN_ROOT}/adapters/copilot/stop_hook.py\"",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}
