@@ -67,11 +67,21 @@ see [Modes](#modes) below.
 ## Install
 
 ```bash
+# every host on this machine
+npx hermes-continue-hook install --host all
+
+# one host
+npx hermes-continue-hook install --host claude-code
+```
+
+For Hermes Agent itself:
+
+```bash
 hermes plugins install ttxs69/hermes-continue-hook
 hermes plugins enable continue-hook
 ```
 
-Then configure (optional — defaults work):
+Then configure (optional — the defaults work):
 
 ```bash
 cat > ~/.hermes/continue_hook.json <<'JSON'
@@ -79,7 +89,7 @@ cat > ~/.hermes/continue_hook.json <<'JSON'
   "enabled": true,
   "dry_run": false,
   "max_nudges_per_turn": 2,
-  "cooldown_seconds": 300
+  "max_nudges_per_session": 20
 }
 JSON
 ```
@@ -90,18 +100,20 @@ to defaults (it can never crash the gateway).
 ## Quick start (30 seconds)
 
 ```bash
-hermes plugins enable continue-hook
-# then, in a Hermes chat, ask for something trivial:
+npx hermes-continue-hook install --host all
+# then ask an agent for something trivial:
 #   "帮我把 README 的安装步骤改短一点"
-# and watch whether the agent asks permission for things it could just do.
+# and watch whether it asks permission for things it could just do.
 ```
 
 Check what it saw:
 
+```bash
+cat ~/.hermes/continue-hook-events.jsonl | tail -5
 ```
-/ch-stats     # evaluation count, ask-rate, reasons
-/ch-test 要不要我继续？   # dry-run the detector on any sentence
-```
+
+In Hermes, the same numbers are available as `/ch-stats`, and
+`/ch-test 要不要我继续？` dry-runs the detector on any sentence.
 
 ## How it works
 
@@ -128,8 +140,9 @@ decided by the agent, inside the nudge. Patterns are plain configurable regexes
 |---|---|---|
 | `enabled` | `true` | Master switch |
 | `dry_run` | `false` | Log-only rollout: record what *would* fire, inject nothing |
-| `max_nudges_per_turn` | `2` | Loop guard |
-| `cooldown_seconds` | `300` | Minimum gap between nudges in one session |
+| `max_nudges_per_turn` | `2` | Nudges allowed along one turn (resets when a turn ends cleanly) |
+| `max_nudges_per_session` | `20` | Backstop for hosts without a host-side cap (DeepSeek Harness, Cursor) |
+| `cooldown_seconds` | `0` (off) | Optional minimum gap between two nudges in a session |
 | `tail_chars` | `240` | Only inspect the closing N characters |
 | `triggers.offer` | — | First-person offers: `要不要我`, `需要我…做吗`, `should i`, `want me to` |
 | `triggers.hand_off` | — | Decision hand-offs: `你定`, `听你的`, `your call` |
