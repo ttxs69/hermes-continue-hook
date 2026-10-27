@@ -160,6 +160,51 @@ await test("an unknown host is rejected", () => {
   assert.ok(res.out.includes("unknown host"));
 });
 
+await test("an installed shell hook actually runs and blocks", () => {
+  // The missing-transport-module bug: the installed hook imported a module
+  // the installer never copied, so it failed open and did nothing — silently.
+  const home = freshHome();
+  runCli(["install", "--host", "claude-code"], home);
+  const hook = path.join(home, ".hermes", "continue-hook", "claude-code", "stop_hook.py");
+  assert.ok(existsSync(hook), "the hook must be installed");
+  const out = execFileSync(
+    "python3",
+    [hook],
+    {
+      env: { ...process.env, HOME: home },
+      encoding: "utf8",
+      input: JSON.stringify({
+        session_id: "e2e",
+        stop_hook_active: false,
+        last_assistant_message: "要不要我顺便也把示例补上？",
+      }),
+    },
+  );
+  const decision = JSON.parse(out.trim());
+  assert.strictEqual(decision.decision, "block");
+  assert.ok(decision.reason.includes("continue-hook"));
+});
+
+await test("an installed shell hook stays silent on a clean reply", () => {
+  const home = freshHome();
+  runCli(["install", "--host", "claude-code"], home);
+  const hook = path.join(home, ".hermes", "continue-hook", "claude-code", "stop_hook.py");
+  const out = execFileSync(
+    "python3",
+    [hook],
+    {
+      env: { ...process.env, HOME: home },
+      encoding: "utf8",
+      input: JSON.stringify({
+        session_id: "e2e2",
+        stop_hook_active: false,
+        last_assistant_message: "已完成，42 项测试全绿。",
+      }),
+    },
+  );
+  assert.strictEqual(out.trim(), "");
+});
+
 await test("the installed runtime can answer a decision", () => {
   const home = freshHome();
   runCli(["install", "--host", "all"], home);

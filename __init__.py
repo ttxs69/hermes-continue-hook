@@ -33,11 +33,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-try:  # package load (installed as a Python distribution)
-    from .detector import ConfigStore, detect  # type: ignore[attr-defined]
+try:  # package load (Hermes loads a plugin dir as ``hermes_plugins.<slug>``)
+    from .detector import ConfigStore, build_nudge, detect  # type: ignore[attr-defined]
     from .hookctl import decide  # type: ignore[attr-defined]
-except ImportError:  # flat execution (repo layout, tests)
-    from detector import ConfigStore, detect  # type: ignore[no-redef]
+except ImportError:  # flat execution (repo layout, tests, npm package)
+    from detector import ConfigStore, build_nudge, detect  # type: ignore[no-redef]
     from hookctl import decide  # type: ignore[no-redef]
 
 __version__ = "1.3.0"
@@ -68,11 +68,18 @@ def register(ctx: Any) -> None:
     cfg_store = ConfigStore(cfg_path())
 
     # --- stash the last LLM output per session (observer; never transforms) ---
-    def on_llm_output(text: Any, session_id: Any = None, **kw: Any) -> None:
+    # Hermes calls this hook with keyword arguments only
+    # (``response_text=…, session_id=…, model=…, platform=…, turn_id=…``), and
+    # a callback that takes a required positional argument would raise
+    # TypeError there — the hook would never store anything and the plugin
+    # would silently never fire. ``text`` is accepted as a legacy alias.
+    def on_llm_output(response_text: Any = None, session_id: Any = None,
+                      text: Any = None, **kw: Any) -> None:
         try:
-            if isinstance(text, str) and text:
+            payload = response_text if isinstance(response_text, str) else text
+            if isinstance(payload, str) and payload:
                 key = str(kw.get("session_id") or session_id or "?")
-                _last_text[key] = text
+                _last_text[key] = payload
         except Exception:
             pass
         return None
@@ -96,23 +103,20 @@ def register(ctx: Any) -> None:
                               platform=str(platform or ""))
             if not decision.should_nudge:
                 return
-            try:
-                from detector import build_nudge  # type: ignore[no-redef]
-                nudge = build_nudge(decision.attempt)
-            except Exception:
-                nudge = (
-                    "【continue-hook】Your last reply ended by asking the user a "
-                    "question. Re-check once: if it touches a user-only boundary "
-                    "(money, identity, publishing, deleting data, shared systems) "
-                    "or needs information only the user has, re-ask in ONE short "
-                    "line and stop. Otherwise do the work now and report result, "
-                    "verification and remaining risks."
-                )
-            session_key = kw.get("session_key")
-            if session_key:
-                ctx.inject_message(nudge, role="user", session_key=session_key)
-            else:
-                ctx.inject_message(nudge, role="user", origin=True)
+            nudge = build_nudge(decision.attempt)
+            # Injection contract (hermes_cli/plugins_injection.py):
+            #  * CLI mode  — no target at all; the message goes to the local
+            #    REPL queue and the agent continues.
+            #  * Gateway   — a durable session_key (a composite key such as
+            #    "agent:main:discord:thread:42") or an origin mapping.
+            # Passing ``origin=True`` is not a mapping and is rejected, which
+            # would break the CLI path too.
+            key = str(kw.get("session_key") or session_id or "")
+            injected = bool(ctx.inject_message(nudge, role="user", session_key=key)) if (
+                key and ":" in key) else bool(ctx.inject_message(nudge, role="user"))
+            if not injected:
+                _log({"session": sid, "decision": "inject_failed",
+                      "reason": "the host did not accept the nudge"})
         except Exception as exc:
             _log({"session": sid, "decision": "error",
                   "reason": f"{type(exc).__name__}: {exc}"})

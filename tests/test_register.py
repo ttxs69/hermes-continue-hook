@@ -74,7 +74,8 @@ class TestRegister(unittest.TestCase):
 
     def test_turn_end_nudge_injects_into_session(self):
         self.ctx.hooks["transform_llm_output"](
-            "要不要我继续拆解下一条？", session_id="s1")
+            response_text="要不要我继续拆解下一条？", session_id="s1",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s1", platform="qqbot")
         self.assertEqual(len(self.ctx.injected), 1)
         self.assertEqual(self.ctx.injected[0]["role"], "user")
@@ -82,13 +83,15 @@ class TestRegister(unittest.TestCase):
 
     def test_turn_end_declarative_no_inject(self):
         self.ctx.hooks["transform_llm_output"](
-            "已完成，验证通过。", session_id="s2")
+            response_text="已完成，验证通过。", session_id="s2",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s2", platform="qqbot")
         self.assertEqual(self.ctx.injected, [])
 
     def test_interrupted_turn_skips(self):
         self.ctx.hooks["transform_llm_output"](
-            "要不要我继续？", session_id="s3")
+            response_text="要不要我继续？", session_id="s3",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](
             session_id="s3", platform="qqbot", interrupted=True)
         self.assertEqual(self.ctx.injected, [])
@@ -100,43 +103,58 @@ class TestRegister(unittest.TestCase):
         never reset, so "max_nudges_per_turn: 2" meant two nudges per session,
         ever.
         """
-        self.ctx.hooks["transform_llm_output"]("要不要我继续？", session_id="s4")
+        self.ctx.hooks["transform_llm_output"](
+            response_text="要不要我继续？", session_id="s4",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s4", platform="qqbot")
         self.assertEqual(len(self.ctx.injected), 1)
 
         # a turn that ends cleanly closes the chain
-        self.ctx.hooks["transform_llm_output"]("已完成。", session_id="s4")
+        self.ctx.hooks["transform_llm_output"](
+            response_text="已完成。", session_id="s4", model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s4", platform="qqbot")
         self.assertEqual(len(self.ctx.injected), 1)
 
         # the next turn may be nudged again
-        self.ctx.hooks["transform_llm_output"]("要不要我再做？", session_id="s4")
+        self.ctx.hooks["transform_llm_output"](
+            response_text="要不要我再做？", session_id="s4",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s4", platform="qqbot")
         self.assertEqual(len(self.ctx.injected), 2)
 
     def test_cooldown_blocks_rapid_second_nudge(self):
         self._write_config({"cooldown_seconds": 300})
-        self.ctx.hooks["transform_llm_output"]("要不要我继续？", session_id="s5")
+        self.ctx.hooks["transform_llm_output"](
+            response_text="要不要我继续？", session_id="s5",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s5", platform="qqbot")
         self.assertEqual(len(self.ctx.injected), 1)
-        self.ctx.hooks["transform_llm_output"]("要不要我再做？", session_id="s5")
+        self.ctx.hooks["transform_llm_output"](
+            response_text="要不要我再做？", session_id="s5",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s5", platform="qqbot")
         self.assertEqual(len(self.ctx.injected), 1)  # cooldown, not 2
 
     def test_dry_run_never_injects(self):
         self._write_config({"dry_run": True})
-        self.ctx.hooks["transform_llm_output"]("要不要我继续？", session_id="s6")
+        self.ctx.hooks["transform_llm_output"](
+            response_text="要不要我继续？", session_id="s6",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s6", platform="qqbot")
         self.assertEqual(self.ctx.injected, [])
 
     def test_disabled_never_injects(self):
         self._write_config({"enabled": False})
-        self.ctx.hooks["transform_llm_output"]("要不要我继续？", session_id="s7")
+        self.ctx.hooks["transform_llm_output"](
+            response_text="要不要我继续？", session_id="s7",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s7", platform="qqbot")
         self.assertEqual(self.ctx.injected, [])
 
     def test_event_log_records_the_evaluation(self):
-        self.ctx.hooks["transform_llm_output"]("要不要我继续？", session_id="s8")
+        self.ctx.hooks["transform_llm_output"](
+            response_text="要不要我继续？", session_id="s8",
+            model="m", platform="cli")
         self.ctx.hooks["on_session_end"](session_id="s8", platform="qqbot")
         log = Path(self._tmp.name) / ".hermes" / "continue-hook-events.jsonl"
         self.assertTrue(log.exists())
@@ -148,6 +166,48 @@ class TestRegister(unittest.TestCase):
         out = self.ctx.commands["ch-test"]("done.")
         self.assertIn("detect=False", out)
 
+
+
+    def test_hook_callbacks_accept_the_real_hermes_call_shape(self):
+        """Hermes calls lifecycle hooks with keyword arguments only.
+
+        A callback with a required positional parameter raises TypeError there;
+        the hook then never fires and the plugin silently does nothing. This
+        test calls the hooks exactly the way
+        ``agent/turn_finalizer.py`` does.
+        """
+        import inspect
+
+        for event, kwargs in (
+            ("transform_llm_output", {
+                "response_text": "要不要我继续？",
+                "session_id": "kw1",
+                "model": "m",
+                "platform": "cli",
+                "turn_id": "1",
+            }),
+            ("on_session_end", {
+                "session_id": "kw2",
+                "task_id": "t",
+                "turn_id": "1",
+                "completed": False,
+                "failed": False,
+                "interrupted": False,
+                "turn_exit_reason": "done",
+                "model": "m",
+                "platform": "cli",
+            }),
+        ):
+            callback = self.ctx.hooks[event]
+            signature = inspect.signature(callback)
+            required = [
+                name for name, p in signature.parameters.items()
+                if p.default is inspect.Parameter.empty
+                and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            ]
+            self.assertEqual(required, [], f"{event} has required positional parameters")
+            # and it must survive the real call shape
+            self.assertIsNone(callback(**kwargs))
 
 if __name__ == "__main__":
     unittest.main()

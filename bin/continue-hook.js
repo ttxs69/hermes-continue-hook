@@ -29,6 +29,13 @@ const RUNTIME_DIR = path.join(homedir(), ".hermes", "continue-hook");
 /** Shared runtime files every host needs. */
 const RUNTIME_FILES = ["detector.py", "hookctl.py"];
 
+/**
+ * The shell-hook adapters import their shared transport module from the
+ * directory next to them, so it has to be installed beside them — missing it
+ * would make every installed hook fail open (and do nothing).
+ */
+const TRANSPORT_FILES = [{ from: "adapters/_common.py", to: "_common.py" }];
+
 const SKILL_DIRS = [
   ".claude/skills", ".codex/skills", ".cursor/skills", ".gemini/skills",
   ".agents/skills", ".copilot/skills", ".qwen/skills", ".config/opencode/skills",
@@ -220,6 +227,9 @@ const copyIfMissing = (from, to, dryRun) => {
 function installRuntime(opts) {
   for (const file of RUNTIME_FILES) {
     copyIfMissing(path.join(PKG_ROOT, file), path.join(RUNTIME_DIR, file), opts.dryRun);
+  }
+  for (const file of TRANSPORT_FILES) {
+    copyIfMissing(path.join(PKG_ROOT, file.from), path.join(RUNTIME_DIR, file.to), opts.dryRun);
   }
   for (const host of HOST_NAMES) {
     const def = HOSTS[host];

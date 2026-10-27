@@ -2,6 +2,23 @@
 
 ## 1.3.0 (2026-10-28)
 
+- **Fixed (release blocker): the Hermes plugin never fired.** Hermes calls
+  lifecycle hooks with keyword arguments only (`response_text=…`), and the
+  plugin's observer took a required positional `text` — so every call raised
+  TypeError, the hook stored nothing, and the plugin silently did nothing.
+  The callback now accepts the real call shape, and a test calls the hooks
+  exactly the way `agent/turn_finalizer.py` does.
+- **Fixed (release blocker): the installer never copied the adapters' shared
+  transport module**, so every installed shell hook failed to import and
+  failed open — installed and doing nothing. The installer now copies it,
+  and a test drives an *installed* hook end-to-end.
+- **Fixed: the plugin injected with `origin=True`**, which the host rejects
+  (it wants a mapping) — and which also broke the CLI path, where no target
+  must be passed at all. A rejected injection is now recorded in the event
+  log instead of disappearing.
+- **Fixed: a question mark inside a URL counted as a question**, so a reply
+  ending with a link looked like it was asking permission.
+
 - DeepSeek Harness (dsh) support as a **native Cordis plugin**
   (`adapters/dsh/`): hooks `agent/turn-stopping`, reads the reply from
   `agent.session.deriveMessages()`, and continues with
