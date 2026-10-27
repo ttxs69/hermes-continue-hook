@@ -1,13 +1,28 @@
 name: Publish
 
 # Publishing is tag-driven: push a vX.Y.Z tag whose name matches the version
-# in package.json, and this workflow publishes to npm with provenance.
+# in package.json, and this workflow publishes to npm.
 #
-# The publish step needs an npm token. Two supported ways:
-#   * Trusted publishing (OIDC) — create the package once with a token, then
-#     configure the trusted publisher on npmjs.com (repo, workflow filename,
-#     environment). No long-lived secret in this repository.
-#   * A plain automation token stored as the NPM_TOKEN repository secret.
+# ── How the npm credentials work ────────────────────────────────────────────
+# npm's *trusted publishing* (OIDC) is used when it is available: npm CLI
+# 11.5.1+ exchanges the workflow's OIDC token for a short-lived registry
+# token, so no long-lived secret sits in the repository. Configure it once,
+# after the package exists on npm:
+#
+#   npm trust hermes-continue-hook \
+#     --repo ttxs69/hermes-continue-hook \
+#     --file publish.yml \
+#     --env npm \
+#     --allow-publish
+#
+# The first publish of a *new* package cannot use OIDC — npm requires the
+# package to already exist on the registry — so it needs an automation token
+# in the `NPM_TOKEN` secret. After that one publish, trusted publishing takes
+# over and the secret can be removed.
+#
+# Provenance needs: npm CLI >= 9.5.0, a cloud-hosted runner, `id-token: write`
+# (set below), and a public `repository` field in package.json that matches
+# the publish location exactly.
 
 on:
   push:
@@ -52,11 +67,13 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
-      - name: Verify the package on npm
-        run: npm view "${{ steps.gate.outputs.version }}" version
-        continue-on-error: true
-      - name: Install the package manager
+      - name: Use a current npm (11.5.1+ for trusted publishing)
         run: npm install -g npm@latest
+      - name: Check what is already published
+        run: |
+          npm view hermes-continue-hook versions --json || echo "not published yet"
+      - name: Pack and show the contents
+        run: npm pack --dry-run
       - name: Dry run
         if: ${{ inputs.dry-run }}
         run: npm publish --dry-run --access public
@@ -64,4 +81,5 @@ jobs:
         if: ${{ inputs.dry-run != true }}
         run: npm publish --access public --provenance
         env:
+          # Empty when trusted publishing is configured — npm then uses OIDC.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
