@@ -5,10 +5,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "== ruff"
-ruff check .
+${RUFF:-ruff} check .
 
 echo "== mypy"
-mypy
+${MYPY:-mypy}
 
 echo "== python tests"
 python3 -m unittest discover -s tests

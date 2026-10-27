@@ -1,10 +1,49 @@
 # Contributing
 
-- Tests: stdlib `unittest` only, no third-party test deps; must pass in BOTH
-  runners — `python tests/test_x.py` and `python -m unittest discover -s tests` —
-  and under an empty `HOME` (CI reproduces a clean runner).
-- No style gate (no ruff/black CI step by design). `python -m compileall` must pass.
-- New trigger/exclusion patterns: add a test case with the *exact* sentence that
-  motivated it (real-world quote beats invented example).
-- Keep detector.py transport-only: regex decides *whether* to consider nudging;
-  whether the question was legitimate stays with the agent (nudge prompt).
+## Before you push
+
+```bash
+./scripts/check.sh      # ruff, mypy, the Python suite, the Node suites, npm pack
+```
+
+It is the same set of checks CI runs, minus the DeepSeek Harness typecheck
+(which needs the npm registry):
+
+```bash
+bash adapters/dsh/typecheck.sh   # compiles the dsh plugin against @deepseek-ai/dsh-*
+node tests/test_dsh.mjs           # runs it against a mock harness
+```
+
+## The rules that matter
+
+- **One decision service.** Caps, state and the event log live in
+  `hookctl.py`. A host adapter may not re-implement them — a cap that means
+  two different things in two hosts is a bug. `detector.py` stays pure
+  pattern matching: it answers "does this reply look like it is asking
+  permission?", never "should we nudge now?".
+- **The agent decides.** Detection only decides *whether to consider nudging*.
+  Whether the caught question was legitimate stays with the agent, inside the
+  nudge. See `docs/ARCHITECTURE.md`.
+- **Fail open.** Any error means "no nudge". A broken hook must never wedge
+  somebody's agent session.
+- **One copy of an adapter.** Each adapter implementation lives in exactly
+  one place; `tests/test_version_consistency.py` fails the build if a second
+  copy appears (a stale copy of the OpenCode plugin once shipped in the repo).
+- **New trigger/exclusion patterns:** add a test case with the *exact*
+  sentence that motivated it. A real-world quote beats an invented example.
+- **Version in four places** (`package.json`, `pyproject.toml`, `plugin.yaml`,
+  `__init__.py`) — the version-consistency test keeps them in step.
+- Tests use the standard library `unittest` only, no third-party test
+  dependencies, and must pass in BOTH runners — `python tests/test_x.py` and
+  `python -m unittest discover -s tests` — and under an empty `HOME`.
+
+## Adding a host
+
+1. Add the adapter under `adapters/<host>/` and its example config.
+2. If the host can block a turn end, add it to `HOOKS` in
+   `bin/continue-hook.js` with the right `kind`, and add a test that drives
+   the adapter with that host's real payload shape.
+3. Add the host to the support matrix in `README.md`, with the source of the
+   contract you relied on (a doc URL beats a description).
+4. If the host has no turn-end hook, add it to the behaviour tier — the
+   `skills/continue-hook/SKILL.md` layer already covers it.
