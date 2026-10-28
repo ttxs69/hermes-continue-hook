@@ -11,9 +11,6 @@ __pycache__/
 .github/
 tests/
 scripts/
-docs/
-patch-mode/
-agent-hooks/
 CONTRIBUTING.md
 AGENTS.md
 CLAUDE.md

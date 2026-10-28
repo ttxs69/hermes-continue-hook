@@ -1,7 +1,7 @@
 ---
 name: continue-hook
 description: Use when finishing a turn — stop asking "should I…?" / "要不要我…" and just do the work. Triggers on any turn ending that pushes a self-advancable decision back to the user.
----
+<!-- hermes-continue-hook: generated — do not edit -->
 
 # continue-hook — finish the work instead of asking for permission
 

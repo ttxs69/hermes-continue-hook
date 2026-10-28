@@ -181,21 +181,23 @@ function readJson(file, { onBroken = "abort", dryRun = false } = {}) {
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (err) {
-    // "ignore": a read-only caller (check) just reports the file as not ours.
-    // "skip": the caller handles it (uninstall must not truncate the file, and
-    // must not abort the rest of the hosts in the same run).
+    // "skip" — the caller decides what to do, and nothing is written here.
+    if (onBroken === "skip") {
+      console.error(`✗ ${file} is not valid JSON (${err.message}) — left untouched.`);
+      return null;
+    }
+    // "ignore" — a read-only caller (check) just reports the file as not ours.
     if (onBroken === "ignore") return {};
-    if (onBroken === "skip") return null;
-    const backup = `${file}.bak-${Date.now()}`;
-    // A dry run must leave the disk untouched — including the backup.
-    if (!dryRun) writeFileSync(backup, raw, "utf8");
+    // One stable backup name: a timestamped one accumulated on every retry.
+    const backup = `${file}.bak`;
+    if (!dryRun && !existsSync(backup)) writeFileSync(backup, raw, "utf8");
     console.error(
       `✗ ${file} is not valid JSON (${err.message}).\n` +
-        `  Nothing was written. ` +
-        (dryRun ? `A real run would copy the original to ${backup}.` : `The original is copied to:\n    ${backup}`) +
-        `\n  Fix the file (a trailing comma or a // comment is the usual cause) and re-run.`,
+        `  This host was left untouched` +
+        (dryRun ? "." : ` (original saved as ${backup}).`) +
+        `\n  Fix it (a trailing comma or a // comment is the usual cause) and re-run.`,
     );
-    process.exit(3);
+    return null;
   }
 }
 
@@ -276,7 +278,7 @@ const installedHosts = () => {
     // inside ~/.hermes/continue-hook/. Skipping them here let a single-host
     // uninstall delete the runtime that other installed hosts were running on.
     if (def.kind === "skills") {
-      if (SKILL_DIRS.some((d) => existsSync(path.join(expand(d), "continue-hook", "SKILL.md")))) out.push(host);
+      if (SKILL_DIRS.some((d) => isOurFile(path.join(expand(d), "continue-hook", "SKILL.md")))) out.push(host);
       continue;
     }
     if (def.kind === "file") {
@@ -341,7 +343,14 @@ function patchHooks(data, kind, hookCmd) {
   if (kind === "cursor-stop") {
     kept.push({ command: hookCmd, loop_limit: 5 });
   } else if (kind === "copilot-stop") {
-    kept.push({ type: "command", bash: hookCmd, timeoutSec: 30 });
+    kept.push({
+      type: "command",
+      bash: hookCmd,
+      // Copilot reads `bash` on POSIX and `powershell` on Windows; a bash-only
+      // entry silently does nothing there.
+      powershell: hookCmd,
+      timeoutSec: 30,
+    });
   } else if (kind === "gemini-after") {
     kept.push({ hooks: [{ name: "continue-hook", type: "command", command: hookCmd, timeout: 30000 }] });
   } else {
@@ -440,95 +449,114 @@ function installHost(host, opts) {
       const ok = copyFile(path.join(PKG_ROOT, "skills", "continue-hook", "SKILL.md"), target, opts.dryRun).ok;
       results.push({ path: target, ok });
     }
-    return results;
+    return { status: "ok", results };
   }
 
   if (def.kind === "file") {
     const target = expand(def.target);
     const ok = copyFile(path.join(PKG_ROOT, def.source), target, opts.dryRun).ok;
     results.push({ path: target, ok });
-    return results;
+    return { status: "ok", results };
   }
 
   if (def.kind === "dsh") {
     const target = expand(def.target);
+    // The whole dsh directory is ours once its package.json carries the marker,
+    // so its support files are copied without the "is this ours" dance.
+    const ours = isOurFile(path.join(target, "package.json"));
     for (const file of ["src/index.ts", "package.json", "cordis.patch.yml", "tsconfig.json"]) {
-      results.push({ path: path.join(target, file), ok: copyFile(path.join(PKG_ROOT, "adapters", "dsh", file), path.join(target, file), opts.dryRun).ok });
+      results.push({ path: path.join(target, file), ok: copyFile(path.join(PKG_ROOT, "adapters", "dsh", file), path.join(target, file), opts.dryRun, { own: ours }).ok });
     }
-    results.push({ path: path.join(target, "hookctl.py"), ok: copyFile(path.join(PKG_ROOT, "hookctl.py"), path.join(target, "hookctl.py"), opts.dryRun).ok });
-    results.push({ path: path.join(target, "detector.py"), ok: copyFile(path.join(PKG_ROOT, "detector.py"), path.join(target, "detector.py"), opts.dryRun).ok });
-    return results;
+    results.push({ path: path.join(target, "hookctl.py"), ok: copyFile(path.join(PKG_ROOT, "hookctl.py"), path.join(target, "hookctl.py"), opts.dryRun, { own: true }).ok });
+    results.push({ path: path.join(target, "detector.py"), ok: copyFile(path.join(PKG_ROOT, "detector.py"), path.join(target, "detector.py"), opts.dryRun, { own: true }).ok });
+    return { status: "ok", results };
   }
 
   // JSON-config hosts
   const configPath = expand(def.config);
   const data = readJson(configPath, { dryRun: opts.dryRun });
+  if (data === null) {
+    // One unparsable config must not abort the other hosts: it is skipped, the
+    // user is told, and the run ends with a non-zero status.
+    return { status: "skipped", reason: "unparsable config", results };
+  }
   const hookCmd = hookCommand(def.hook);
   const patched = patchHooks(data, def.kind, hookCmd);
   if (!opts.dryRun) writeJson(configPath, patched);
   results.push({ path: configPath, ok: true });
-  return results;
+  return { status: "ok", results };
 }
 
 function uninstallHost(host, opts) {
   const def = HOSTS[host];
   const results = [];
+
   if (def.kind === "skills") {
     for (const dir of SKILL_DIRS) {
       const target = path.join(expand(dir), "continue-hook");
-      if (existsSync(target) && !opts.dryRun) rmSync(target, { recursive: true, force: true });
-      results.push({ path: target, ok: true });
+      const skill = path.join(target, "SKILL.md");
+      if (!existsSync(skill)) continue;
+      // A skill directory the user wrote is not ours to delete.
+      if (!isOurFile(skill)) {
+        console.error(`! ${skill} was not written by continue-hook — left alone`);
+        results.push({ path: `${skill} (not ours)`, ok: true });
+        continue;
+      }
+      if (!opts.dryRun) rmSync(target, { recursive: true, force: true });
+      results.push({ path: skill, ok: true });
     }
-    return results;
+    return { status: "ok", results };
   }
+
   if (def.kind === "file") {
     const target = expand(def.target);
     if (!existsSync(target)) {
       results.push({ path: `${target} (absent)`, ok: true });
-      return results;
+      return { status: "ok", results };
     }
     if (!isOurFile(target)) {
       console.error(`! ${target} was not written by continue-hook — leaving it alone`);
       results.push({ path: `${target} (not ours)`, ok: true });
-      return results;
+      return { status: "ok", results };
     }
-    // A file carrying our generation marker is reproducible from the package,
-    // so it is deleted outright — and never left beside the host, where
-    // OpenCode would load "something.js.removed" as a plugin.
+    // A file carrying our marker is reproducible from the package, so it is
+    // deleted outright — and never left beside the host, where OpenCode would
+    // load "something.js.removed" as a plugin.
     if (!opts.dryRun) rmSync(target, { force: true });
     results.push({ path: target, ok: true });
-    return results;
+    return { status: "ok", results };
   }
+
   if (def.kind === "dsh") {
     const target = expand(def.target);
     if (!isOurFile(path.join(target, "package.json"))) {
       results.push({ path: `${target} (not ours)`, ok: true });
-      return results;
+      return { status: "ok", results };
     }
     if (!opts.dryRun) rmSync(target, { recursive: true, force: true });
     results.push({ path: target, ok: true });
-    return results;
+    return { status: "ok", results };
   }
+
   const configPath = expand(def.config);
   if (!existsSync(configPath)) {
     // "removes only what this tool installed" — an uninstall must never create
     // the host's config file on a machine that never had one.
     results.push({ path: `${configPath} (absent)`, ok: true });
-    return results;
+    return { status: "ok", results };
   }
-  // Never write over a file we could not parse: allowBroken here turned a
-  // JSONC config into "{}" — install refuses and backs it up, uninstall must
-  // behave the same way instead of truncating the user's settings.
   const data = readJson(configPath, { dryRun: opts.dryRun, onBroken: "skip" });
   if (data === null) {
-    console.error(`! ${configPath} is not valid JSON — left untouched. Fix it and re-run to remove the hook.`);
-    results.push({ path: `${configPath} (unparsable, left alone)`, ok: true });
-    return results;
+    // We cannot see whether our hook is in there, so we cannot claim this host
+    // was cleaned — and the caller must not delete the runtime it still points
+    // at. That combination left a dead hook that exits 2 (a blocking error in
+    // Claude Code) on every stop.
+    return { status: "skipped", reason: "unparsable config", results };
   }
   const cleaned = removeOurs(data, def.kind);
   if (!opts.dryRun) writeJson(configPath, cleaned);
   results.push({ path: configPath, ok: true });
-  return results;
+  return { status: "ok", results };
 }
 
 function checkHost(host) {
@@ -537,7 +565,7 @@ function checkHost(host) {
   // error, which turned a diagnostic into a mutation.
 
   if (def.kind === "skills") {
-    const found = SKILL_DIRS.filter((d) => existsSync(path.join(expand(d), "continue-hook", "SKILL.md")));
+    const found = SKILL_DIRS.filter((d) => isOurFile(path.join(expand(d), "continue-hook", "SKILL.md")));
     return { host, label: def.label, installed: found.length > 0, detail: `${found.length}/${SKILL_DIRS.length} skill dirs` };
   }
   if (def.kind === "file") {
@@ -640,15 +668,22 @@ Event log:    ~/.hermes/continue-hook-events.jsonl`);
 
   if (!uninstall) installRuntime(opts);
 
+  const skipped = [];
   for (const host of opts.hosts) {
     const def = HOSTS[host];
-    const results = uninstall ? uninstallHost(host, opts) : installHost(host, opts);
-    const verb = uninstall ? "removed" : "installed";
-    console.log(`${def.label}: ${verb}`);
-    if (!uninstall && def.note) console.log(`  → ${def.note}`);
-    if (host === "dsh" && !uninstall) {
-      console.log(`  → build:  cd ${expand(def.target)} && npm install && npm run build`);
-      console.log(`  → load:   npx @deepseek-ai/dsh --profile web --patch ${expand(def.target)}/cordis.patch.yml`);
+    const outcome = uninstall ? uninstallHost(host, opts) : installHost(host, opts);
+    const results = outcome.results || [];
+    if (outcome.status === "ok") {
+      console.log(`${def.label}: ${uninstall ? "removed" : "installed"}`);
+      if (!uninstall && def.note) console.log(`  → ${def.note}`);
+      if (host === "dsh" && !uninstall) {
+        console.log(`  → build:  cd ${expand(def.target)} && npm install && npm run build`);
+        console.log(`  → load:   npx @deepseek-ai/dsh --profile web --patch ${expand(def.target)}/cordis.patch.yml`);
+      }
+    } else {
+      // The host was not touched: say so, and keep going.
+      skipped.push(host);
+      console.error(`${def.label}: ${outcome.status} — ${outcome.reason}; nothing was changed for it`);
     }
     for (const r of results) {
       if (!r.ok) console.log(`  ! skipped (source missing): ${r.path}`);
@@ -656,18 +691,28 @@ Event log:    ~/.hermes/continue-hook-events.jsonl`);
   }
 
   if (uninstall) {
-    // The runtime directory holds executable Python. Leaving it behind means
-    // "uninstalled" still leaves runnable code in the home directory.
-    const stillUsed = installedHosts();
+    // The runtime directory holds executable Python, so it should go — but only
+    // when nothing still points at it. A host we could not read counts as
+    // "still used": deleting the runtime would leave its hook firing into a
+    // file that no longer exists (exit 2, which several hosts treat as "block").
+    const stillUsed = [...new Set([...installedHosts(), ...skipped])];
     if (stillUsed.length) {
-      console.log(`\nRuntime kept: ${RUNTIME_DIR} (still used by ${stillUsed.join(", ")})`);
+      console.log(`\nRuntime kept: ${RUNTIME_DIR} (still needed by ${stillUsed.join(", ")})`);
     } else if (existsSync(RUNTIME_DIR) && !opts.dryRun) {
       rmSync(RUNTIME_DIR, { recursive: true, force: true });
       console.log(`\nRuntime removed: ${RUNTIME_DIR}`);
     }
   }
 
-  if (!uninstall) {
+  if (skipped.length) {
+    console.error(
+      `\n${skipped.length} host(s) left untouched: ${skipped.join(", ")}.\n` +
+        `  Fix the file(s) above and re-run for those hosts.`,
+    );
+    process.exitCode = 3;
+  }
+
+  if (!uninstall && !skipped.length) {
     console.log(`\nRuntime files: ${RUNTIME_DIR}`);
     console.log("Config:        ~/.hermes/continue_hook.json");
     console.log("Event log:     ~/.hermes/continue-hook-events.jsonl");

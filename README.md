@@ -285,9 +285,9 @@ of date.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests   # 143 tests: detector, plugin, 8 adapters, dsh/pi contracts
+python3 -m unittest discover -s tests   # 144 tests: detector, plugin, 8 adapters, dsh/pi contracts
 node tests/test_opencode.mjs            # 13 tests: OpenCode plugin against a mock SDK client
-node tests/test_installer.mjs           # 28 tests: install / idempotence / uninstall / non-destruction
+node tests/test_installer.mjs           # 33 tests: install / idempotence / uninstall / non-destruction
 node tests/test_dsh.mjs                 # 7 tests: dsh plugin, compiled against the real dsh packages
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```

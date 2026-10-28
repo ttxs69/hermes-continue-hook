@@ -298,8 +298,9 @@ await test("an unparsable host config is backed up, never overwritten", () => {
   assert.strictEqual(res.code, 3, "install must refuse instead of overwriting");
   assert.strictEqual(readFileSync(path.join(home, ".claude", "settings.json"), "utf8"), original,
     "the original file was modified");
-  const backups = readdirSync(path.join(home, ".claude")).filter((f) => f.includes(".bak-"));
+  const backups = readdirSync(path.join(home, ".claude")).filter((f) => f.includes(".bak"));
   assert.strictEqual(backups.length, 1, "the original must be backed up");
+  assert.strictEqual(backups[0], "settings.json.bak", "one stable name; a timestamped one accumulated");
 });
 
 await test("the hook command survives a home directory with a space", () => {
@@ -398,14 +399,21 @@ await test("uninstall never truncates a config it cannot parse", () => {
   // It used readJson(..., allowBroken) here, which returned {} and then wrote
   // it — turning a JSONC settings.json into a single "{}".
   const home = freshHome();
-  mkdirSync(path.join(home, ".claude"), { recursive: true });
-  const original = '{\n  // my model\n  "model": "opus"\n}\n';
-  writeFileSync(path.join(home, ".claude", "settings.json"), original);
+  // Install first (so the runtime exists and a hook points at it), then break
+  // the file the way a user would — by adding a comment.
+  runCli(["install", "--host", "claude-code"], home);
+  const settings = path.join(home, ".claude", "settings.json");
+  const withHook = readFileSync(settings, "utf8");
+  const original = `// my model\n${withHook}`;
+  writeFileSync(settings, original);
   const res = runCli(["uninstall", "--host", "all"], home);
-  assert.strictEqual(res.code, 0, res.out);
-  assert.strictEqual(readFileSync(path.join(home, ".claude", "settings.json"), "utf8"), original,
-    "the user's config was truncated");
+  assert.strictEqual(res.code, 3, "an untouched host must make the run non-zero");
+  assert.strictEqual(readFileSync(settings, "utf8"), original, "the user's config was truncated");
   assert.match(res.out, /not valid JSON/, "the user must be told why it was skipped");
+  assert.match(res.out, /skipped/, "the host must not be reported as removed");
+  // and the runtime must survive: the hook in that file still points at it
+  assert.ok(existsSync(path.join(home, ".hermes", "continue-hook", "hookctl.py")),
+    "the runtime was deleted while a hook still referenced it");
 });
 
 await test("uninstall leaves a user file whose text mentions continue-hook", () => {
@@ -461,6 +469,26 @@ await test("every installed host fires through the command written into its conf
     assert.ok(out.includes(c.expect), `${c.host} did not emit ${c.expect}: ${out.slice(0, 120)}`);
     assert.ok(out.includes("continue-hook"), `${c.host}: wrong nudge payload`);
   }
+});
+
+await test("a skill the user wrote is not deleted by uninstall", () => {
+  const home = freshHome();
+  const skill = path.join(home, ".claude", "skills", "continue-hook", "SKILL.md");
+  mkdirSync(path.dirname(skill), { recursive: true });
+  const mine = "# my own skill\n";
+  writeFileSync(skill, mine);
+  const before = runCli(["check", "--host", "skills"], home);
+  assert.match(before.out, /✗/, "a user skill must not be reported as ours");
+  const res = runCli(["uninstall", "--host", "skills"], home);
+  assert.strictEqual(res.code, 0, res.out);
+  assert.strictEqual(readFileSync(skill, "utf8"), mine, "uninstall deleted the user's own skill");
+});
+
+await test("repeated installs do not pile up backups", () => {
+  const home = freshHome();
+  for (let i = 0; i < 3; i++) runCli(["install", "--host", "skills,pi,dsh"], home);
+  const found = execFileSync("sh", ["-c", `find ${JSON.stringify(home)} -name '*.bak*' | wc -l`], { encoding: "utf8" }).trim();
+  assert.strictEqual(found, "0", `backups accumulated: ${found}`);
 });
 
 await test("check reports what is installed", () => {

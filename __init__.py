@@ -57,7 +57,12 @@ def _log(event: dict[str, Any]) -> None:
     """Best-effort append to the events log. Never raises."""
     try:
         record = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), **event}
-        with open(events_path(), "a", encoding="utf-8") as handle:
+        target = events_path()
+        # The log has to exist even when we bail out before the decision
+        # service runs (e.g. a gateway we cannot inject into), otherwise the
+        # reason we gave is invisible.
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with open(target, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass
@@ -99,6 +104,20 @@ def register(ctx: Any) -> None:
             text = _last_text.pop(sid, None)
             if not text:
                 return
+            # Decide whether we could even deliver *before* counting a nudge.
+            # On a messaging gateway the payload carries no session_key/origin,
+            # so nothing can be injected — and a nudge recorded as delivered
+            # would inflate the ask-rate and eat the session's allowance.
+            key = str(kw.get("session_key") or "")
+            origin = kw.get("origin")
+            platform_name = str(platform or "").lower()
+            is_local = platform_name in ("", "cli", "tui", "desktop", "local")
+            if not (key and ":" in key) and origin is None and not is_local:
+                _log({"session": sid, "decision": "inject_unsupported_gateway",
+                      "reason": f"platform {platform_name!r} gives on_session_end no "
+                                f"session_key/origin; use patch mode for same-turn "
+                                f"continuation on messaging gateways"})
+                return
             decision = decide(text, session_id=sid, host="hermes",
                               platform=str(platform or ""))
             if not decision.should_nudge:
@@ -116,22 +135,12 @@ def register(ctx: Any) -> None:
             # gateway there is nothing valid to pass, and a fabricated key would
             # target a session that does not exist. Say so instead of writing a
             # cheerful "nudged" record that never reached anyone.
-            key = str(kw.get("session_key") or "")
-            origin = kw.get("origin")
-            platform_name = str(platform or "").lower()
-            is_local = platform_name in ("", "cli", "tui", "desktop", "local")
             if key and ":" in key:
                 injected = bool(ctx.inject_message(nudge, role="user", session_key=key))
             elif origin is not None:
                 injected = bool(ctx.inject_message(nudge, role="user", origin=origin))
-            elif is_local:
-                injected = bool(ctx.inject_message(nudge, role="user"))
             else:
-                _log({"session": sid, "decision": "inject_unsupported_gateway",
-                      "reason": f"platform {platform_name!r} gives on_session_end no "
-                                f"session_key/origin; use patch mode for same-turn "
-                                f"continuation on messaging gateways"})
-                return
+                injected = bool(ctx.inject_message(nudge, role="user"))
             if not injected:
                 _log({"session": sid, "decision": "inject_failed",
                       "reason": "the host did not accept the nudge"})
