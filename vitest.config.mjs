@@ -25,6 +25,18 @@ export default defineConfig({
     hookTimeout: 60_000,
     // The dsh suite writes into a fixed fixture directory.
     fileParallelism: false,
+    // The dsh suite is the only one that needs the npm registry: it installs
+    // the real @deepseek-ai/dsh-* packages to compile against. That makes it
+    // slow, network-dependent, and — the reason this flag exists — a
+    // different thing from the rest of the suite.
+    //
+    // `scripts/check.sh` runs vitest without network access, so it excludes
+    // this file; CI runs it in a dedicated job (the "dsh plugin (typecheck +
+    // runtime)" job) where the install happens on purpose. The two are not
+    // the same gate and should not pretend to be: a release that runs a
+    // network install in the middle of the prepublish check is a release
+    // whose outcome depends on the registry's mood.
+
     coverage: {
       provider: "v8",
       reporter: ["text"],

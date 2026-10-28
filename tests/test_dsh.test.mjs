@@ -173,19 +173,17 @@ console.log("compiling the plugin …");
 const TSC_JS = path.join(WORK, "node_modules", "typescript", "bin", "tsc");
 if (!existsSync(TSC_JS)) {
   console.error("continue-hook dsh test: typescript is not installed at", TSC_JS);
-  console.error("  npm root:", execFileSync("npm", ["root"], { encoding: "utf8" }).trim());
-  console.error("  npm prefix:", execFileSync("npm", ["prefix"], { encoding: "utf8" }).trim());
-  console.error(
-    "  npm config prefix:",
-    execFileSync("npm", ["config", "get", "prefix"], { encoding: "utf8" }).trim(),
-  );
-  console.error("  node_modules present:", existsSync(path.join(WORK, "node_modules")));
-  if (existsSync(path.join(WORK, "node_modules"))) {
-    console.error(
-      "  node_modules contains:",
-      readdirSync(path.join(WORK, "node_modules")).join(", "),
-    );
-  }
+  // Run the npm queries in the scratch directory — that is where the
+  // install ran. The previous version of this diagnostic ran them in the
+  // repository root and reported the root's values, which is a different
+  // question than the one being asked.
+  const ask = (args) => execFileSync(NPM, args, { cwd: WORK, encoding: "utf8" }).trim();
+  console.error("  WORK:", WORK);
+  console.error("  WORK contents:", readdirSync(WORK).join(", ") || "(empty)");
+  console.error("  npm root (in WORK):", ask(["root"]));
+  console.error("  npm prefix (in WORK):", ask(["prefix"]));
+  console.error("  npm config prefix:", ask(["config", "get", "prefix"]));
+  console.error("  npm config cache:", ask(["config", "get", "cache"]));
   console.error("  npm on PATH:", execFileSync("which", ["npm"], { encoding: "utf8" }).trim());
   process.exit(1);
 }
