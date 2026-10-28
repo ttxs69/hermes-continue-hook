@@ -15,7 +15,7 @@ import { it } from "vitest";
  *   node tests/test_dsh.mjs
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, cpSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, cpSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,7 +55,13 @@ writeFileSync(
         "@deepseek-ai/dsh-llm": "*",
         "@deepseek-ai/dsh-session": "*",
         "@deepseek-ai/cordis": "*",
-        typescript: "*",
+        // typescript is pinned to the 5.x line on purpose. TypeScript 7 ships
+        // as a native binary (`@typescript/typescript-linux-x64`), and npm
+        // does not create a `node_modules/.bin/tsc` shim for it — so the
+        // compile step below failed with a bare ENOENT while the install
+        // itself had succeeded. A test that installs "latest" is a test that
+        // breaks when the ecosystem moves.
+        typescript: "~5.9.3",
         "@types/node": "*",
       },
     },
@@ -63,8 +69,13 @@ writeFileSync(
     2,
   ),
 );
+// Use the npm that is next to the node running this test, not whatever `npm`
+// happens to be first on PATH. The release workflow upgrades the global npm
+// mid-job, so the two can differ — and then the install lands somewhere the
+// test does not look.
+const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 execFileSync(
-  "npm",
+  NPM,
   [
     "install",
     "--no-package-lock",
@@ -110,7 +121,21 @@ writeFileSync(
   ),
 );
 console.log("compiling the plugin …");
-execFileSync(path.join(WORK, "node_modules", ".bin", "tsc"), ["-p", "tsconfig.json"], {
+// Report what the install actually produced, so a failure here says which
+// piece is missing rather than only that some piece is.
+const TSC = path.join(WORK, "node_modules", ".bin", "tsc");
+if (!existsSync(TSC)) {
+  console.error("continue-hook dsh test: no tsc at", TSC);
+  console.error("  node_modules present:", existsSync(path.join(WORK, "node_modules")));
+  if (existsSync(path.join(WORK, "node_modules"))) {
+    console.error(
+      "  node_modules contains:",
+      readdirSync(path.join(WORK, "node_modules")).join(", "),
+    );
+  }
+  console.error("  npm on PATH:", execFileSync("which", ["npm"], { encoding: "utf8" }).trim());
+}
+execFileSync(TSC, ["-p", "tsconfig.json"], {
   cwd: WORK,
   stdio: "inherit",
 });
