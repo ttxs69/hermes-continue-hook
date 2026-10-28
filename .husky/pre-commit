@@ -20,12 +20,17 @@ cd "$(dirname "$0")/.."
 # The toolchain must be the one the workflows use — same rule as
 # the full gate does, and the reason it is checked here first: a commit made
 # with the wrong node produces a different result than the same commit in CI.
-PINNED_MAJOR="$(cat .nvmrc 2>/dev/null | cut -d. -f1)"
-if [ -n "${PINNED_MAJOR}" ]; then
-  CURRENT_MAJOR="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
-  if [ -n "${CURRENT_MAJOR}" ] && [ "${CURRENT_MAJOR}" != "${PINNED_MAJOR}" ]; then
-    echo "node ${CURRENT_MAJOR} is running; .nvmrc pins ${PINNED_MAJOR}." >&2
-    echo "Run 'nvm use' so this commit matches CI." >&2
+# Compare the whole version, not the major. `.nvmrc` used to hold a major
+# ("24"), and that was not the same thing: setup-node resolved it to 24.21.0
+# while this machine ran 24.22.1, so "it runs here" still said nothing about
+# "it runs there". A patch-level difference is the exact shape of the bug
+# that cost six release attempts.
+PINNED="$(tr -d '[:space:]' < .nvmrc 2>/dev/null)"
+if [ -n "${PINNED}" ]; then
+  CURRENT="$(node --version 2>/dev/null | sed 's/^v//')"
+  if [ -n "${CURRENT}" ] && [ "${CURRENT}" != "${PINNED}" ]; then
+    echo "node ${CURRENT} is running; .nvmrc pins ${PINNED}." >&2
+    echo "Use that exact version (nvm use) so this check matches CI." >&2
     exit 1
   fi
 fi

@@ -8,12 +8,17 @@ cd "$(dirname "$0")/.."
 # different node/npm than CI is a gate that does not predict CI: the publish
 # job used to run a different npm than every other job, and the difference
 # showed up as a failing release rather than as a failing test.
-PINNED_MAJOR="$(cat .nvmrc 2>/dev/null | cut -d. -f1)"
-if [ -n "${PINNED_MAJOR}" ]; then
-  CURRENT_MAJOR="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
-  if [ -n "${CURRENT_MAJOR}" ] && [ "${CURRENT_MAJOR}" != "${PINNED_MAJOR}" ]; then
-    echo "!! node ${CURRENT_MAJOR} is running; .nvmrc pins ${PINNED_MAJOR}." >&2
-    echo "!! Use the pinned version (nvm use) so this gate matches CI." >&2
+# Compare the whole version. `.nvmrc` used to hold a major ("24"), which was
+# not the same thing: setup-node resolved "24" to 24.21.0 in CI while this
+# machine ran 24.22.1. A patch-level difference is the shape of the bug that
+# cost six release attempts, so the gate now refuses to run on anything but
+# the exact version it names.
+PINNED="$(tr -d '[:space:]' < .nvmrc 2>/dev/null)"
+if [ -n "${PINNED}" ]; then
+  CURRENT="$(node --version 2>/dev/null | sed 's/^v//')"
+  if [ -n "${CURRENT}" ] && [ "${CURRENT}" != "${PINNED}" ]; then
+    echo "!! node ${CURRENT} is running; .nvmrc pins ${PINNED}." >&2
+    echo "!! Use that exact version (nvm use) so this gate matches CI." >&2
     exit 1
   fi
 fi
