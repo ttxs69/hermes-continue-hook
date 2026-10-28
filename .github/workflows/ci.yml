@@ -65,6 +65,13 @@ jobs:
         run: python -m pip install --upgrade pip pytest pytest-cov ruff
       - name: pytest with the coverage floor
         run: pytest --cov --cov-report=term-missing
+      # The release scripts are maintainer tools, not part of the published
+      # package — but a syntax error in one breaks the release, so they are
+      # parsed here.
+      - name: shell scripts parse
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+          echo "shell scripts OK"
 
   node18-cli:
     name: node 18 — the shipped CLI still runs

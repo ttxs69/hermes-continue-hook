@@ -281,6 +281,7 @@ of date.
 * [docs/DESIGN.md](docs/DESIGN.md) — the twelve routes evaluated for the
   Hermes plugin, and why each was rejected
 * [docs/PUBLISHING.md](docs/PUBLISHING.md) — how a release reaches npm
+  (trusted publishing / OIDC, and the staged-publishing path for a first release)
 
 ## Tests
 

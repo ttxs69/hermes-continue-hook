@@ -49,7 +49,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ttxs69/hermes-continue-hook.git"
+    "url": "git+https://github.com/ttxs69/hermes-continue-hook.git",
+    "directory": "."
   },
   "homepage": "https://github.com/ttxs69/hermes-continue-hook",
   "bugs": {
@@ -72,5 +73,6 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1",
     "vitest": "5.0.5"
-  }
+  },
+  "author": "ttxs69"
 }
