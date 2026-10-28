@@ -7,7 +7,7 @@
  * configuration is never touched.
  */
 import assert from "node:assert";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -18,17 +18,13 @@ const ALL_HOSTS = "claude-code,codex,qwen,cursor,copilot,gemini,opencode,pi,dsh,
 const CLI = path.join(REPO, "bin", "continue-hook.js");
 
 function runCli(args, home) {
-  try {
-    return {
-      code: 0,
-      out: execFileSync(process.execPath, [CLI, ...args], {
-        env: { ...process.env, HOME: home },
-        encoding: "utf8",
-      }),
-    };
-  } catch (err) {
-    return { code: err.status ?? 1, out: `${err.stdout || ""}${err.stderr || ""}` };
-  }
+  // Both streams: warnings and refusals go to stderr, and a test that only
+  // reads stdout on success cannot see them.
+  const res = spawnSync(process.execPath, [CLI, ...args], {
+    env: { ...process.env, HOME: home },
+    encoding: "utf8",
+  });
+  return { code: res.status ?? 1, out: `${res.stdout || ""}${res.stderr || ""}` };
 }
 
 function freshHome() {
