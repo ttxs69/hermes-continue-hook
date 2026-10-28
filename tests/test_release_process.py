@@ -212,8 +212,21 @@ class TestGitHooks(unittest.TestCase):
     def test_husky_is_installed_by_the_prepare_script(self) -> None:
         """Otherwise the hooks exist only for whoever set them up by hand."""
         package = json.loads(_read(self.root / "package.json"))
-        self.assertEqual(package["scripts"].get("prepare"), "husky")
+        prepare = package["scripts"].get("prepare", "")
+        self.assertIn("install-git-hooks", prepare)
         self.assertIn("husky", package.get("devDependencies", {}))
+
+    def test_the_prepare_script_survives_a_pack_without_dev_dependencies(self) -> None:
+        """npm runs `prepare` for `npm pack` too.
+
+        CI has a job that packs the package without installing the dev
+        dependencies, and there husky is not there at all. The script has to
+        notice that and carry on — "sh: 1: husky: not found" is not a reason
+        to refuse to build a package.
+        """
+        script = _read(self.root / "scripts" / "install-git-hooks.sh")
+        self.assertIn("node_modules/.bin/husky", script)
+        self.assertIn("exit 0", script)
 
 
 class TestNoSecretIsNeeded(unittest.TestCase):
