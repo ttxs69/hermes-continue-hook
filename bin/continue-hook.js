@@ -142,7 +142,8 @@ function parseArgs(argv) {
   // "skills" named by hand means "put the portable skill everywhere"; skills
   // that arrive through "all" only go to hosts this machine actually has.
   opts.skillsExplicit = opts.hosts.includes("skills");
-  if (opts.hosts.includes("all")) opts.hosts = [...HOST_NAMES];
+  opts.hostsAll = opts.hosts.includes("all");
+  if (opts.hostsAll) opts.hosts = [...HOST_NAMES];
   const unknown = opts.hosts.filter((h) => !HOSTS[h]);
   if (unknown.length) {
     console.error(`unknown host(s): ${unknown.join(", ")}\nknown: ${HOST_NAMES.join(", ")}`);
@@ -151,19 +152,54 @@ function parseArgs(argv) {
   return opts;
 }
 
-function readJson(file) {
+/**
+ * Read a host config.
+ *
+ * A missing file is normal ({}); a file we cannot *parse* is not. Swallowing
+ * the parse error and then writing our version over it destroyed a user's
+ * settings.json — including a JSONC file with comments, which many hosts
+ * accept and JSON.parse does not. Callers get the error so they can refuse.
+ */
+function readJson(file, { allowBroken = false } = {}) {
+  if (!existsSync(file)) return {};
+  const raw = readFileSync(file, "utf8");
+  if (!raw.trim()) return {};
   try {
-    if (!existsSync(file)) return {};
-    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
+  } catch (err) {
+    if (allowBroken) return {};
+    const backup = `${file}.bak-${Date.now()}`;
+    writeFileSync(backup, raw, "utf8");
+    console.error(
+      `✗ ${file} is not valid JSON (${err.message}).\n` +
+        `  Nothing was written. The original is copied to:\n    ${backup}\n` +
+        `  Fix the file (a trailing comma or a // comment is the usual cause) and re-run.`,
+    );
+    process.exit(3);
   }
 }
 
 function writeJson(file, data) {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
+/**
+ * The shell command a host runs.
+ *
+ * Quoted: an unquoted path breaks on a home directory with a space in it
+ * ("/Users/John Smith/…"), and the host then sees a non-zero exit — which
+ * several hosts read as "block", the exact opposite of fail-open.
+ */
+function hookCommand(hookFile) {
+  const script = path.join(RUNTIME_DIR, hookFile);
+  const quote = (s) => (/[\s"'$`\\]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s);
+  const py =
+    process.platform === "win32"
+      ? "py -3"
+      : process.env.CONTINUE_HOOK_PYTHON || "python3";
+  return `${py} ${quote(script)}`;
 }
 
 /** The command a hook entry runs, whichever field the host uses. */
@@ -190,14 +226,23 @@ const commandOf = (entry) => {
  * actually present get the skill; `.agents` is the Agent Skills standard
  * location and is always written.
  */
+let presentHostDirs = null;
+
+/**
+ * Snapshot which host directories existed *before* we touched anything.
+ *
+ * Evaluating this lazily was wrong: by the time the skills host runs, the
+ * earlier hosts in the same `--host all` run have already created their
+ * config directories, so every host looked "present" and the skill landed in
+ * fifteen places again.
+ */
 const skillTargetDirs = () => {
   const always = [".agents/skills"];
-  const present = SKILL_DIRS.filter((dir) => {
-    if (always.includes(dir)) return true;
-    // ~/.claude/skills is present when ~/.claude is.
-    return existsSync(path.join(expand(dir), ".."));
-  });
-  return present.length ? present : always;
+  if (presentHostDirs === null) {
+    presentHostDirs = SKILL_DIRS.filter((dir) => existsSync(path.join(expand(dir), "..")));
+  }
+  const present = [...new Set([...always, ...presentHostDirs])];
+  return present;
 };
 
 const configPath = (def) => expand(def.config ?? def.target ?? ".");
@@ -207,7 +252,18 @@ const installedHosts = () => {
   const out = [];
   for (const host of HOST_NAMES) {
     const def = HOSTS[host];
-    if (def.kind === "skills" || def.kind === "file" || def.kind === "dsh") continue;
+    // file / dsh / skills do not live in a JSON hook list, but they still use
+    // the shared runtime: the Pi and OpenCode extensions locate hookctl.py
+    // inside ~/.hermes/continue-hook/. Skipping them here let a single-host
+    // uninstall delete the runtime that other installed hosts were running on.
+    if (def.kind === "skills") {
+      if (SKILL_DIRS.some((d) => existsSync(path.join(expand(d), "continue-hook", "SKILL.md")))) out.push(host);
+      continue;
+    }
+    if (def.kind === "file" || def.kind === "dsh") {
+      if (existsSync(expand(def.target))) out.push(host);
+      continue;
+    }
     const data = readJson(expand(def.config));
     const key =
       def.kind === "cursor-stop" ? "stop" : def.kind === "copilot-stop" ? "agentStop" : def.kind === "gemini-after" ? "AfterAgent" : "Stop";
@@ -225,9 +281,14 @@ const isOurs = (entry) => {
   // Our own runtime directory, plus the same layout under a different HOME —
   // a machine that moved its home directory still has to be able to clean up
   // after itself.
+  const ours = RUNTIME_DIR.replace(/\\/g, "/");
+  if (normalized.includes(`${ours}/`)) return true;
+  // A different HOME: same layout, but only if it runs one of our files. This
+  // used to be a bare substring, so any command mentioning the directory was
+  // treated as ours and deleted.
   return (
-    normalized.includes(`${RUNTIME_DIR.replace(/\\/g, "/")}/`) ||
-    normalized.includes("/.hermes/continue-hook/")
+    normalized.includes("/.hermes/continue-hook/") &&
+    /(stop_hook\.py|hookctl\.py|detector\.py|_common\.py|continue-hook\.(js|ts))\b/.test(normalized)
   );
 };
 
@@ -253,7 +314,7 @@ function patchHooks(data, kind, hookCmd) {
   }
 
   if (kind === "cursor-stop") {
-    kept.push({ command: hookCmd, loop_limit: 2 });
+    kept.push({ command: hookCmd, loop_limit: 5 });
   } else if (kind === "copilot-stop") {
     kept.push({ type: "command", bash: hookCmd, timeoutSec: 30 });
   } else if (kind === "gemini-after") {
@@ -343,8 +404,9 @@ function installHost(host, opts) {
 
   // JSON-config hosts
   const configPath = expand(def.config);
+  const existed = existsSync(configPath);
   const data = readJson(configPath);
-  const hookCmd = `python3 ${path.join(RUNTIME_DIR, def.hook)}`;
+  const hookCmd = hookCommand(def.hook);
   const patched = patchHooks(data, def.kind, hookCmd);
   if (!opts.dryRun) writeJson(configPath, patched);
   results.push({ path: configPath, ok: true });
@@ -397,14 +459,17 @@ function checkHost(host) {
     return { host, label: def.label, installed: existsSync(path.join(target, "src", "index.ts")), detail: target };
   }
   const configPath = expand(def.config);
+  if (!existsSync(configPath)) {
+    return { host, label: def.label, installed: false, detail: `${configPath} (absent)` };
+  }
   const data = readJson(configPath);
-  const blob = JSON.stringify(data);
-  return {
-    host,
-    label: def.label,
-    installed: blob.includes("continue-hook"),
-    detail: configPath,
-  };
+  const key =
+    def.kind === "cursor-stop" ? "stop" : def.kind === "copilot-stop" ? "agentStop" : def.kind === "gemini-after" ? "AfterAgent" : "Stop";
+  const list = data?.hooks?.[key];
+  // Not a substring match: a user's own ~/bin/continue-hook-backup.sh made
+  // `check` report an install that did not exist.
+  const installed = Array.isArray(list) && list.some((g) => isOurs(g) || (Array.isArray(g?.hooks) && g.hooks.some(isOurs)));
+  return { host, label: def.label, installed, detail: configPath };
 }
 
 function doctor() {
@@ -453,6 +518,33 @@ Event log:    ~/.hermes/continue-hook-events.jsonl`);
   }
 
   const uninstall = opts.command === "uninstall";
+  // Freeze the "which hosts already exist" snapshot before this run creates
+  // any directory — otherwise every host looks present by the time the skills
+  // layer runs.
+  presentHostDirs = SKILL_DIRS.filter((dir) => existsSync(path.join(expand(dir), "..")));
+
+  if (opts.hostsAll) {
+    // "all" means every host *on this machine*, which is what the README says.
+    // Expanding it to all ten created config files for agents that are not
+    // installed.
+    if (uninstall) {
+      // Uninstall has to reach everything we may ever have written, including
+      // a config whose host directory the user has since deleted.
+      opts.hosts = [...HOST_NAMES];
+    } else {
+      const detected = doctor().filter((r) => r.detected).map((r) => r.host);
+      if (!detected.length) {
+        console.error(
+          "no supported agent found in this home directory.\n" +
+            "  name the hosts explicitly, e.g.  continue-hook install --host claude-code,cursor",
+        );
+        process.exit(1);
+      }
+      opts.hosts = [...detected, "skills"];
+      console.log(`detected: ${detected.join(", ")}`);
+    }
+  }
+
   if (!uninstall) installRuntime(opts);
 
   for (const host of opts.hosts) {

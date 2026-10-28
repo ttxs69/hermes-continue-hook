@@ -80,5 +80,58 @@ class TestPatchModeStandalone(unittest.TestCase):
         self.assertNotIn("/home/", source)
 
 
+
+class TestTheGateIsOffUntilAsked(unittest.TestCase):
+    """Installing the patch must not start nudging turns by itself.
+
+    The switch is `agent.continue_hook_enabled` and it defaults to off; the old
+    fallback read the shared config's `enabled` (default true), so the
+    documented switch did nothing and the gate ran the moment it was installed.
+    """
+
+    def _enabled(self, hermes_cfg, env=None):
+        code = f"""
+import sys, types
+pkg = types.ModuleType("hermes_cli"); pkg.__path__ = []
+cfg = types.ModuleType("hermes_cli.config")
+cfg.load_config = lambda: {hermes_cfg!r}
+sys.modules["hermes_cli"] = pkg
+sys.modules["hermes_cli.config"] = cfg
+sys.path.insert(0, {str(self.root)!r})
+import continue_hook
+print(continue_hook.continue_hook_enabled())
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True, text=True,
+            env={**os.environ, "HOME": self.home, **(env or {})},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.strip() == "True"
+
+    def setUp(self):
+        self.root = Path(__file__).resolve().parent.parent / "patch-mode"
+        self._td = tempfile.TemporaryDirectory()
+        self.home = self._td.name
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_no_configuration_means_off(self):
+        self.assertFalse(self._enabled({}))
+
+    def test_the_documented_switch_is_authoritative(self):
+        self.assertTrue(self._enabled({"agent": {"continue_hook_enabled": True}}))
+        self.assertFalse(self._enabled({"agent": {"continue_hook_enabled": False}}))
+
+    def test_the_environment_can_opt_in_when_nothing_is_configured(self):
+        self.assertTrue(self._enabled({}, {"HERMES_CONTINUE_HOOK": "1"}))
+
+    def test_a_configured_off_beats_the_environment(self):
+        self.assertFalse(
+            self._enabled({"agent": {"continue_hook_enabled": False}}, {"HERMES_CONTINUE_HOOK": "1"})
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

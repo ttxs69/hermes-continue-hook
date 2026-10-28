@@ -19,7 +19,7 @@
  *   * if the detector is missing or errors, the plugin does nothing (fail open)
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -105,12 +105,13 @@ async function promptSession(client, sessionId, text) {
   }
 }
 
-export async function handleIdle(client, event, state) {
+export async function handleIdle(client, event) {
   const sessionId = event?.properties?.sessionID || event?.properties?.info?.id || "";
   if (!sessionId) return { nudged: false, reason: "no_session" };
-  if (state.lastSession === sessionId && state.lastNudgeAt && Date.now() - state.lastNudgeAt < 1500) {
-    return { nudged: false, reason: "debounce" };
-  }
+  // No local debounce: the engine records every evaluation and its per-turn
+  // cap is what prevents a double nudge. Keeping a private 1.5 s window here
+  // meant a skipped evaluation left no trace, so the event log could not be
+  // used as the denominator.
   let messages = [];
   try {
     messages = await client.session.messages({ path: { id: sessionId } });
@@ -127,13 +128,10 @@ export async function handleIdle(client, event, state) {
   const verdict = shouldNudge(text, sessionId);
   if (!verdict.nudge) return { nudged: false, reason: verdict.reason };
   const sent = await promptSession(client, sessionId, verdict.nudgeText || NUDGE);
-  state.lastSession = sessionId;
-  state.lastNudgeAt = Date.now();
   return { nudged: sent, reason: sent ? "nudged" : "prompt_failed" };
 }
 
 export const ContinueHookPlugin = async ({ client }) => {
-  const state = { lastSession: null, lastNudgeAt: 0 };
   return {
     event: async ({ event }) => {
       if (!event || event.type !== "session.idle") return;

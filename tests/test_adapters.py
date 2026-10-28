@@ -179,9 +179,17 @@ class TestCursorHook(unittest.TestCase):
         self.assertIn("continue-hook", data["followup_message"])
 
     def test_loop_count_blocks_further_followups(self):
-        code, out = run_hook("cursor", cursor_payload(loop_count=2), transcript=CLAUDE_STYLE)
+        # 5 is Cursor's own documented default. It is a loop guard, not the
+        # per-turn cap: Cursor counts follow-ups per conversation, so using 2
+        # here would end the product's job for the rest of the conversation.
+        code, out = run_hook("cursor", cursor_payload(loop_count=5), transcript=CLAUDE_STYLE)
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
+
+    def test_loop_count_below_the_host_cap_still_nudges(self):
+        code, out = run_hook("cursor", cursor_payload(loop_count=2), transcript=CLAUDE_STYLE)
+        self.assertEqual(code, 0)
+        self.assertIn("followup_message", out)
 
     def test_aborted_status_skips(self):
         code, out = run_hook("cursor", cursor_payload(status="aborted"), transcript=CLAUDE_STYLE)

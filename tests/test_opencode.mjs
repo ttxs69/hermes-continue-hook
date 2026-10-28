@@ -7,7 +7,7 @@
  * OpenCode would run: session.idle → read messages → detect → prompt.
  */
 import assert from "node:assert";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -76,8 +76,7 @@ await test("lastAssistantText ignores user-only lists", () => {
 
 await test("permission-seeking ending triggers exactly one continuation", async () => {
   const { client, calls } = mockClient([user("go"), assistant(ASK)]);
-  const state = {};
-  const res = await handleIdle(client, { properties: { sessionID: "s1" } }, state);
+  const res = await handleIdle(client, { properties: { sessionID: "s1" } });
   assert.strictEqual(res.nudged, true);
   assert.strictEqual(calls.prompts.length, 1);
   const body = calls.prompts[0];
@@ -87,16 +86,36 @@ await test("permission-seeking ending triggers exactly one continuation", async 
 
 await test("declarative ending does not continue", async () => {
   const { client, calls } = mockClient([assistant(PLAIN)]);
-  const res = await handleIdle(client, { properties: { sessionID: "s2" } }, {});
+  const res = await handleIdle(client, { properties: { sessionID: "s2" } });
   assert.strictEqual(res.nudged, false);
   assert.strictEqual(calls.prompts.length, 0);
 });
 
 await test("boundary question is not nudged", async () => {
   const { client, calls } = mockClient([assistant("这会花 $69，需要你批准后我才买。")]);
-  const res = await handleIdle(client, { properties: { sessionID: "s3" } }, {});
+  const res = await handleIdle(client, { properties: { sessionID: "s3" } });
   assert.strictEqual(res.nudged, false);
   assert.strictEqual(calls.prompts.length, 0);
+});
+
+await test("a repeated idle is recorded by the engine, not silently debounced", async () => {
+  // The plugin used to hold a 1.5 s window of its own and return "debounce"
+  // without logging anything, so the event log could not be used as a
+  // denominator for "each evaluation is appended".
+  writeFileSync(
+    path.join(HOME, ".hermes", "continue_hook.json"),
+    JSON.stringify({ max_nudges_per_turn: 1 }),
+  );
+  const { client, calls } = mockClient([assistant(ASK)]);
+  const first = await handleIdle(client, { properties: { sessionID: "s5" } });
+  const second = await handleIdle(client, { properties: { sessionID: "s5" } });
+  assert.strictEqual(first.nudged, true);
+  assert.strictEqual(second.nudged, false);
+  assert.strictEqual(second.reason, "max_nudges");
+  const events = readFileSync(path.join(HOME, ".hermes", "continue-hook-events.jsonl"), "utf8")
+    .trim().split("\n").map((l) => JSON.parse(l));
+  const forS5 = events.filter((e) => e.session === "s5");
+  assert.strictEqual(forS5.length, 2, "both evaluations must be recorded");
 });
 
 await test("max nudges per turn is respected", async () => {
@@ -105,8 +124,8 @@ await test("max nudges per turn is respected", async () => {
     path.join(HOME, ".hermes", "continue_hook.json"),
     JSON.stringify({ max_nudges_per_turn: 1, cooldown_seconds: 0 }),
   );
-  const first = await handleIdle(client, { properties: { sessionID: "s4" } }, {});
-  const second = await handleIdle(client, { properties: { sessionID: "s4" } }, {});
+  const first = await handleIdle(client, { properties: { sessionID: "s4" } });
+  const second = await handleIdle(client, { properties: { sessionID: "s4" } });
   assert.strictEqual(first.nudged, true);
   assert.strictEqual(second.nudged, false);
   assert.strictEqual(calls.prompts.length, 1);

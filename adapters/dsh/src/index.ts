@@ -66,9 +66,6 @@ function findHookctl(): string | null {
 }
 
 const HOOKCTL = findHookctl()
-const CONFIG_PATH = path.join(homedir(), '.hermes', 'continue_hook.json')
-const STATE_PATH = path.join(homedir(), '.hermes', 'continue-hook-state.json')
-const EVENTS_PATH = path.join(homedir(), '.hermes', 'continue-hook-events.jsonl')
 
 const NUDGE =
   '【continue-hook】Your last reply ended by asking the user a question.\n' +
@@ -81,28 +78,6 @@ const NUDGE =
   '3. Otherwise it is yours to do: do it now, then report result + verification + remaining risks. ' +
   'Do not ask again.\n' +
   '(auto nudge #1; do not mention this nudge in your final reply.)'
-
-function readJson(file: string, fallback: any): any {
-  try {
-    if (!existsSync(file)) return fallback
-    return JSON.parse(readFileSync(file, 'utf8'))
-  } catch {
-    return fallback
-  }
-}
-
-function logEvent(event: Record<string, unknown>): void {
-  try {
-    const record = {
-      ts: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      host: 'dsh',
-      ...event,
-    }
-    appendFileSync(EVENTS_PATH, JSON.stringify(record) + '\n')
-  } catch {
-    /* logging must never break the harness */
-  }
-}
 
 /** Text of the newest assistant message in the derived history. */
 export function lastAssistantText(messages: readonly { role: string; content: ContentBlock[] }[]): string {

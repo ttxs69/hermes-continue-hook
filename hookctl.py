@@ -189,16 +189,55 @@ class _StateLock:
         self._handle = None
 
 
-def log_event(event: dict[str, Any], path: Path | str | None = None) -> None:
-    """Append one evaluation record. Never raises."""
+def log_event(
+    event: dict[str, Any],
+    path: Path | str | None = None,
+    *,
+    snippet: bool = True,
+) -> None:
+    """Append one evaluation record. Never raises.
+
+    The record can carry the tail of the reply, which is conversation content.
+    ``snippet=False`` keeps the decision and drops the text; the file is written
+    owner-only either way.
+    """
     events_path = Path(path) if path else default_events_path()
     try:
         record = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), **event}
-        events_path.parent.mkdir(parents=True, exist_ok=True)
+        if not snippet:
+            record.pop("snippet", None)
+        events_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with open(events_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        try:
+            events_path.chmod(0o600)
+        except OSError:
+            pass  # exotic filesystem; the file still works
     except Exception:
         pass
+
+
+def _num(value: Any, fallback: float, *, integer: bool) -> float:
+    """Coerce a config value, tolerating what people actually write.
+
+    ``cooldown_seconds: 5m`` or ``max_nudges_per_turn: two`` used to raise
+    inside the hook, which breaks the turn instead of falling back — the exact
+    opposite of the documented fail-safe behaviour.
+    """
+    if isinstance(value, bool):
+        return float(fallback)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        multipliers = {"s": 1, "m": 60, "h": 3600}
+        if text and text[-1] in multipliers and text[:-1].replace(".", "", 1).isdigit():
+            return float(text[:-1]) * multipliers[text[-1]]
+        try:
+            return float(text)
+        except ValueError:
+            return float(fallback)
+    return float(fallback)
 
 
 def _session_entry(state: dict[str, Any], session_id: str) -> dict[str, Any]:
@@ -271,6 +310,9 @@ def decide(
     the chain is tracked in the state file either way.
     """
     cfg = load_config(config_path)
+    # The config may redirect the log (a private directory, a read-only home).
+    if events_path is None and isinstance(cfg.get("events_path"), str) and cfg["events_path"].strip():
+        events_path = Path(str(cfg["events_path"])).expanduser()
     # The whole read-modify-write happens under the lock: two hooks firing at
     # once must not overwrite each other's counters.
     state_path = Path(state_path) if state_path else default_state_path()
@@ -300,8 +342,8 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
         # A fresh turn: the per-turn counter starts from zero.
         entry["count"] = 0
 
-    attempt = int(entry.get("count", 0))
-    total = int(entry.get("total", 0))
+    attempt = int(_num(entry.get("count", 0), 0, integer=True))
+    total = int(_num(entry.get("total", 0), 0, integer=True))
     snippet = (text or "")[-160:]
 
     def finish(nudge: bool, reason: str) -> Decision:
@@ -327,6 +369,7 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
                 "snippet": snippet,
             },
             events_path,
+            snippet=bool(cfg.get("log_snippet", True)),
         )
         return Decision(should_nudge=nudge, reason=reason, attempt=attempt)
 
@@ -335,14 +378,14 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
     if not text or not text.strip():
         return finish(False, "empty")
     if chain_open:
-        max_per_turn = int(cfg.get("max_nudges_per_turn", 2))
+        max_per_turn = int(_num(cfg.get("max_nudges_per_turn", 2), 2, integer=True))
         if attempt >= max_per_turn:
             return finish(False, "max_nudges")
-    max_per_session = int(cfg.get("max_nudges_per_session", 20))
+    max_per_session = int(_num(cfg.get("max_nudges_per_session", 20), 20, integer=True))
     if total >= max_per_session:
         return finish(False, "max_nudges_per_session")
-    cooldown = float(cfg.get("cooldown_seconds", 0) or 0)
-    if cooldown > 0 and total > 0 and now - float(entry.get("last_ts", 0.0)) < cooldown:
+    cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
+    if cooldown > 0 and total > 0 and now - _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cooldown:
         return finish(False, "cooldown")
 
     try:

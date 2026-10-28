@@ -100,7 +100,8 @@ DEFAULTS: dict = {
         # User-only boundaries: money, identity, credentials, publishing,
         # destructive actions.
         "boundary": [
-            "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销",
+            "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
+            "买|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱",
             "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她)",
             "生产环境|线上环境|主分支|改数据库|重启服务",
             # Money, credentials, destructive actions and external sending are
@@ -109,7 +110,8 @@ DEFAULTS: dict = {
             # through a payment, a deletion or a send.
             r"\b(paid|paying|prepay|subscription|upgrade to (pro|paid|premium))\b|"
             r"\b(cost|costs|charge|charges|spend|spent|price|priced|budget|fee|fees)\b|"
-            r"\b(purchase|buy|renew|refund|invoice|billing)\b|"
+            r"\b(pay|paid|paying|payment|purchase|buy|renew|refund|invoice|billing|"
+            r"wire|transfer|remit|hire|contract|quote)\b|"
             r"[$€£¥]\s*\d|\d\s*(usd|eur|cny|rmb|dollars?)\b|"
             r"\b(api key|api keys|secret|secrets|credential|credentials|token|"
             r"access key|private key|ssh key|passphrase|password|2fa|otp|verification code)\b|"
@@ -170,7 +172,11 @@ class ConfigStore:
         return cfg
 
 def _compile(patterns) -> re.Pattern:
-    pats = [p for p in (patterns or []) if p]
+    # A string is one pattern, not a list of characters: `"offer": "要不要我"`
+    # used to be iterated per character and matched almost anything.
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    pats = [p for p in (patterns or []) if isinstance(p, str) and p]
     if not pats:
         return re.compile(r"(?!x)x")  # never-matching pattern
     # Case-insensitive: the English triggers are written lowercase, so without
@@ -179,13 +185,28 @@ def _compile(patterns) -> re.Pattern:
     # Chinese patterns are unaffected.
     return re.compile("|".join(f"(?:{p})" for p in pats), re.S | re.IGNORECASE)
 
+def _int(value: Any, fallback: int) -> int:
+    """A config value as an int, never raising.
+
+    ``max_nudges_per_turn: two`` must not turn every stop into
+    ``error:ValueError`` — the documented behaviour is "fall back to defaults".
+    """
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return fallback
+
 def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     """Return ``(should_nudge, reason_code)``. Pure transport layer."""
-    if attempt >= int(cfg.get("max_nudges_per_turn", 2)):
+    if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
         return False, "max_nudges"
     if not text or not str(text).strip():
         return False, "empty"
-    tail = str(text).strip()[-int(cfg.get("tail_chars", 240)):]
+    tail = str(text).strip()[-_int(cfg.get("tail_chars", 240), 240):]
     ex = cfg.get("exclusions", {})
     if _compile(ex.get("boundary")).search(tail):
         return False, "boundary"
@@ -348,16 +369,54 @@ class _StateLock:
             pass
         self._handle = None
 
-def log_event(event: dict[str, Any], path: Path | str | None = None) -> None:
-    """Append one evaluation record. Never raises."""
+def log_event(
+    event: dict[str, Any],
+    path: Path | str | None = None,
+    *,
+    snippet: bool = True,
+) -> None:
+    """Append one evaluation record. Never raises.
+
+    The record can carry the tail of the reply, which is conversation content.
+    ``snippet=False`` keeps the decision and drops the text; the file is written
+    owner-only either way.
+    """
     events_path = Path(path) if path else default_events_path()
     try:
         record = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), **event}
-        events_path.parent.mkdir(parents=True, exist_ok=True)
+        if not snippet:
+            record.pop("snippet", None)
+        events_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with open(events_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        try:
+            events_path.chmod(0o600)
+        except OSError:
+            pass  # exotic filesystem; the file still works
     except Exception:
         pass
+
+def _num(value: Any, fallback: float, *, integer: bool) -> float:
+    """Coerce a config value, tolerating what people actually write.
+
+    ``cooldown_seconds: 5m`` or ``max_nudges_per_turn: two`` used to raise
+    inside the hook, which breaks the turn instead of falling back — the exact
+    opposite of the documented fail-safe behaviour.
+    """
+    if isinstance(value, bool):
+        return float(fallback)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        multipliers = {"s": 1, "m": 60, "h": 3600}
+        if text and text[-1] in multipliers and text[:-1].replace(".", "", 1).isdigit():
+            return float(text[:-1]) * multipliers[text[-1]]
+        try:
+            return float(text)
+        except ValueError:
+            return float(fallback)
+    return float(fallback)
 
 def _session_entry(state: dict[str, Any], session_id: str) -> dict[str, Any]:
     sessions = state.setdefault("sessions", {})
@@ -427,6 +486,9 @@ def decide(
     the chain is tracked in the state file either way.
     """
     cfg = load_config(config_path)
+    # The config may redirect the log (a private directory, a read-only home).
+    if events_path is None and isinstance(cfg.get("events_path"), str) and cfg["events_path"].strip():
+        events_path = Path(str(cfg["events_path"])).expanduser()
     # The whole read-modify-write happens under the lock: two hooks firing at
     # once must not overwrite each other's counters.
     state_path = Path(state_path) if state_path else default_state_path()
@@ -455,8 +517,8 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
         # A fresh turn: the per-turn counter starts from zero.
         entry["count"] = 0
 
-    attempt = int(entry.get("count", 0))
-    total = int(entry.get("total", 0))
+    attempt = int(_num(entry.get("count", 0), 0, integer=True))
+    total = int(_num(entry.get("total", 0), 0, integer=True))
     snippet = (text or "")[-160:]
 
     def finish(nudge: bool, reason: str) -> Decision:
@@ -482,6 +544,7 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
                 "snippet": snippet,
             },
             events_path,
+            snippet=bool(cfg.get("log_snippet", True)),
         )
         return Decision(should_nudge=nudge, reason=reason, attempt=attempt)
 
@@ -490,14 +553,14 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
     if not text or not text.strip():
         return finish(False, "empty")
     if chain_open:
-        max_per_turn = int(cfg.get("max_nudges_per_turn", 2))
+        max_per_turn = int(_num(cfg.get("max_nudges_per_turn", 2), 2, integer=True))
         if attempt >= max_per_turn:
             return finish(False, "max_nudges")
-    max_per_session = int(cfg.get("max_nudges_per_session", 20))
+    max_per_session = int(_num(cfg.get("max_nudges_per_session", 20), 20, integer=True))
     if total >= max_per_session:
         return finish(False, "max_nudges_per_session")
-    cooldown = float(cfg.get("cooldown_seconds", 0) or 0)
-    if cooldown > 0 and total > 0 and now - float(entry.get("last_ts", 0.0)) < cooldown:
+    cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
+    if cooldown > 0 and total > 0 and now - _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cooldown:
         return finish(False, "cooldown")
 
     try:
@@ -511,19 +574,27 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
 
 # ── the Hermes core seam ────────────────────────────────────────────────────
 def continue_hook_enabled() -> bool:
-    """Is the core gate switched on? (Hermes config, then the shared config.)"""
+    """Is the core gate switched on?
+
+    ``agent.continue_hook_enabled`` is the documented switch, and it defaults
+    to **off** — installing the patch must not start nudging turns behind the
+    user's back. The earlier version fell through to the shared config's
+    ``enabled`` (default true), so the switch did nothing and the gate ran as
+    soon as it was installed.
+    """
+    switch = None
     try:
         from hermes_cli.config import load_config
 
-        cfg = load_config()
-        if (cfg.get("agent") or {}).get("continue_hook_enabled"):
-            return True
+        switch = (load_config().get("agent") or {}).get("continue_hook_enabled")
     except Exception:
-        pass
-    try:
-        return bool(load_config().get("enabled", True))
-    except Exception:
-        return True
+        switch = None
+    if switch is None:
+        # Nothing configured (a fresh install, a test, a bare import): the gate
+        # stays off rather than guessing. HERMES_CONTINUE_HOOK=1 is the
+        # explicit opt-in; HERMES_CONTINUE_HOOK=0 is the kill switch below.
+        return _os.environ.get("HERMES_CONTINUE_HOOK") == "1"
+    return bool(switch)
 
 def continue_hook_nudge(agent, final_response) -> str | None:
     """The stop-gate entry point. Called by ``turn_stop_gates.apply_stop_gates``.

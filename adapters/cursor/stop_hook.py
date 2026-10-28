@@ -45,9 +45,10 @@ def main() -> None:
 
     if str(payload.get("status", "completed")) != "completed":
         raise SystemExit(0)
-    if _common.host_loop_exceeded(payload, 2):
-        # Cursor's own loop cap fired: the conversation's chain is over, and the
-        # next user turn has to start from zero.
+    if _common.host_loop_exceeded(payload, 5):
+        # Cursor scopes `loop_count` to the conversation, not the turn, so this
+        # is a last-resort guard against a loop — not the per-turn cap (that is
+        # hookctl's job). 5 is Cursor's own documented default.
         _common.close_chain(session_id=_common.session_key(payload, "cursor"), host="cursor")
         raise SystemExit(0)
 

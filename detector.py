@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 __all__ = ["DEFAULTS", "ConfigStore", "build_nudge", "default_config", "detect"]
 
@@ -91,7 +92,8 @@ DEFAULTS: dict = {
         # User-only boundaries: money, identity, credentials, publishing,
         # destructive actions.
         "boundary": [
-            "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销",
+            "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
+            "买|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱",
             "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她)",
             "生产环境|线上环境|主分支|改数据库|重启服务",
             # Money, credentials, destructive actions and external sending are
@@ -100,7 +102,8 @@ DEFAULTS: dict = {
             # through a payment, a deletion or a send.
             r"\b(paid|paying|prepay|subscription|upgrade to (pro|paid|premium))\b|"
             r"\b(cost|costs|charge|charges|spend|spent|price|priced|budget|fee|fees)\b|"
-            r"\b(purchase|buy|renew|refund|invoice|billing)\b|"
+            r"\b(pay|paid|paying|payment|purchase|buy|renew|refund|invoice|billing|"
+            r"wire|transfer|remit|hire|contract|quote)\b|"
             r"[$€£¥]\s*\d|\d\s*(usd|eur|cny|rmb|dollars?)\b|"
             r"\b(api key|api keys|secret|secrets|credential|credentials|token|"
             r"access key|private key|ssh key|passphrase|password|2fa|otp|verification code)\b|"
@@ -164,7 +167,11 @@ class ConfigStore:
 
 
 def _compile(patterns) -> re.Pattern:
-    pats = [p for p in (patterns or []) if p]
+    # A string is one pattern, not a list of characters: `"offer": "要不要我"`
+    # used to be iterated per character and matched almost anything.
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    pats = [p for p in (patterns or []) if isinstance(p, str) and p]
     if not pats:
         return re.compile(r"(?!x)x")  # never-matching pattern
     # Case-insensitive: the English triggers are written lowercase, so without
@@ -174,13 +181,29 @@ def _compile(patterns) -> re.Pattern:
     return re.compile("|".join(f"(?:{p})" for p in pats), re.S | re.IGNORECASE)
 
 
+def _int(value: Any, fallback: int) -> int:
+    """A config value as an int, never raising.
+
+    ``max_nudges_per_turn: two`` must not turn every stop into
+    ``error:ValueError`` — the documented behaviour is "fall back to defaults".
+    """
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return fallback
+
+
 def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     """Return ``(should_nudge, reason_code)``. Pure transport layer."""
-    if attempt >= int(cfg.get("max_nudges_per_turn", 2)):
+    if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
         return False, "max_nudges"
     if not text or not str(text).strip():
         return False, "empty"
-    tail = str(text).strip()[-int(cfg.get("tail_chars", 240)):]
+    tail = str(text).strip()[-_int(cfg.get("tail_chars", 240), 240):]
     ex = cfg.get("exclusions", {})
     if _compile(ex.get("boundary")).search(tail):
         return False, "boundary"

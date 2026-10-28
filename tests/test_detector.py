@@ -186,6 +186,58 @@ class TestConfigStore(unittest.TestCase):
         self.assertTrue(ConfigStore(p).load()["dry_run"])
 
 
+class TestBadConfigNeverBreaksATurn(unittest.TestCase):
+    """A malformed value must fall back, not raise.
+
+    ``cooldown_seconds: 5m`` used to raise inside the hook, which the shell
+    adapters turned into a traceback and a non-zero exit — the opposite of the
+    documented "degrades to no nudges".
+    """
+
+    def test_numeric_strings_and_garbage(self):
+        cfg = dict(default_config())
+        for value in ("two", "abc", None, True, [], {}):
+            cfg["max_nudges_per_turn"] = value
+            got, reason = detect("要不要我顺便补个测试？", 0, cfg)
+            self.assertTrue(got, f"{value!r} should fall back to the default, got {reason}")
+
+    def test_a_suffix_is_understood(self):
+        cfg = dict(default_config())
+        cfg["tail_chars"] = "100"
+        got, _ = detect("要不要我顺便补个测试？", 0, cfg)
+        self.assertTrue(got)
+
+    def test_a_string_pattern_list_is_not_split_into_characters(self):
+        # `"offer": "要不要我"` used to be iterated per character, so the
+        # pattern matched almost any Chinese sentence.
+        cfg = dict(default_config())
+        cfg["triggers"] = {"offer": "要不要我"}
+        self.assertFalse(detect("今天天气不错，我改完了。", 0, cfg)[0])
+        self.assertTrue(detect("要不要我顺便补个测试？", 0, cfg)[0])
+
+
+class TestMoneyIsAlwaysABoundary(unittest.TestCase):
+    """The nudge must never carry the agent past spending money."""
+
+    def test_chinese_and_english_money(self):
+        cfg = default_config()
+        for text in (
+            "要不要我买这个订阅？",
+            "要不要我付钱给他？",
+            "要不要我把钱转给他？",
+            "要不要我给他打钱？",
+            "要不要我下单买下来？",
+            "要不要我签合同？",
+            "Should I pay the contractor?",
+            "Should I wire the money?",
+            "Should I transfer the funds?",
+            "Should I hire the contractor?",
+            "Should I sign the contract?",
+        ):
+            got, reason = detect(text, 0, cfg)
+            self.assertFalse(got, f"{text} → {reason}")
+
+
 class TestNudge(unittest.TestCase):
     def test_attempt_numbering(self):
         self.assertIn("#1", build_nudge(0))

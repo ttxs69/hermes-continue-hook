@@ -21,7 +21,7 @@
  * disagree with the shell adapters about the caps.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

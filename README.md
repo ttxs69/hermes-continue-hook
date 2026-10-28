@@ -60,6 +60,21 @@ The nudge is injected as a new user-role message into the **same session**
 agent finishes the work by itself. Functionally equivalent — but you will see
 **two messages instead of one**, and the stray question stays in the chat log.
 
+Injection is a privileged operation, so Hermes gates it per plugin. On a
+**gateway** session (Telegram, QQ, Discord …) the nudge is delivered only when
+the plugin has been granted the permission — Hermes refuses it otherwise:
+
+```yaml
+plugins:
+  entries:
+    continue-hook:
+      allow_gateway_injection: true
+```
+
+Without that key the hook still evaluates and logs every decision, but the
+injection is recorded as rejected and no message is delivered. **CLI sessions
+need no permission** — the nudge goes into the running turn directly.
+
 For the seamless behavior (the gate fires *inside* the agent loop, the question
 is never delivered, you only get the finished result) use **patch mode** —
 see [Modes](#modes) below.
@@ -262,9 +277,9 @@ of date.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests   # 127 tests: detector, plugin, 8 adapters, dsh/pi contracts
-node tests/test_opencode.mjs            # 9 tests: OpenCode plugin against a mock SDK client
-node tests/test_installer.mjs           # 17 tests: install / idempotence / uninstall / non-destruction
+python3 -m unittest discover -s tests   # 136 tests: detector, plugin, 8 adapters, dsh/pi contracts
+node tests/test_opencode.mjs            # 10 tests: OpenCode plugin against a mock SDK client
+node tests/test_installer.mjs           # 21 tests: install / idempotence / uninstall / non-destruction
 node tests/test_dsh.mjs                 # 7 tests: dsh plugin, compiled against the real dsh packages
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
@@ -294,6 +309,12 @@ their source-verified reasons are in [`docs/DESIGN.md`](docs/DESIGN.md).
 - Per-turn nudge cap (default 2) and per-session cap (default 20). The cooldown is
   **off by default** — a non-zero value silently stops the hook for minutes after
   the first nudge.
+- **The per-turn cap is a ceiling, not a promise.** Claude Code, Codex, Qwen,
+  Cursor, Copilot and Gemini each report "you already continued this stop", and
+  the hook never blocks twice in the same stop cycle — so on those six hosts a
+  turn gets **one** nudge however high the cap is. Hosts that run the plugin in
+  process (Hermes) or through their own extension API (OpenCode, Pi, dsh) can
+  reach the configured number.
 - Boundary exclusions short-circuit before any trigger: money / identity /
   credentials / publishing / destructive actions are re-asked, never auto-run
 - Kill switch: config `enabled: false`, or env `HERMES_CONTINUE_HOOK=0`
@@ -309,8 +330,16 @@ Every evaluation — including skips, so the denominator exists — is appended 
 {"ts":"2026-10-28 01:03:31","session":"s1","platform":"cli","decision":"skip","reason":"no_trigger","attempt":0,"snippet":"…"}
 ```
 
-`decision` is `nudge` | `skip` | `nudge_dryrun` | `error`; `reason` says which
-rule fired (`trigger:offer`, `boundary`, `user_must`, `cooldown`, `max_nudges`, …).
+`decision` is `nudge` | `skip` | `nudge_dryrun` | `skip_dryrun` | `error` (the two
+`_dryrun` values appear when `dry_run: true` is configured); `reason` says which
+rule fired (`trigger:offer`, `boundary`, `user_must`, `cooldown`, `max_nudges`,
+`chain_closed`, …).
+
+**Privacy:** each record carries the last ~160 characters of the reply as
+`snippet`, so you can see why a decision was made. That is agent output, not
+user input, but it is still conversation content — the log is written `0600`
+next to a `0700` directory. Set `"log_snippet": false` to record the decision
+without the text, or point `"events_path"` at a directory you control.
 
 ## Development
 

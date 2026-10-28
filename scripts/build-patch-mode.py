@@ -65,19 +65,27 @@ FOOTER = '''
 
 # ── the Hermes core seam ────────────────────────────────────────────────────
 def continue_hook_enabled() -> bool:
-    """Is the core gate switched on? (Hermes config, then the shared config.)"""
+    """Is the core gate switched on?
+
+    ``agent.continue_hook_enabled`` is the documented switch, and it defaults
+    to **off** — installing the patch must not start nudging turns behind the
+    user's back. The earlier version fell through to the shared config's
+    ``enabled`` (default true), so the switch did nothing and the gate ran as
+    soon as it was installed.
+    """
+    switch = None
     try:
         from hermes_cli.config import load_config
 
-        cfg = load_config()
-        if (cfg.get("agent") or {}).get("continue_hook_enabled"):
-            return True
+        switch = (load_config().get("agent") or {}).get("continue_hook_enabled")
     except Exception:
-        pass
-    try:
-        return bool(load_config().get("enabled", True))
-    except Exception:
-        return True
+        switch = None
+    if switch is None:
+        # Nothing configured (a fresh install, a test, a bare import): the gate
+        # stays off rather than guessing. HERMES_CONTINUE_HOOK=1 is the
+        # explicit opt-in; HERMES_CONTINUE_HOOK=0 is the kill switch below.
+        return _os.environ.get("HERMES_CONTINUE_HOOK") == "1"
+    return bool(switch)
 
 
 def continue_hook_nudge(agent, final_response) -> str | None:

@@ -2,62 +2,6 @@
 
 ## 1.3.0 (2026-10-28)
 
-- **Fixed: installing the Cursor/Copilot hook deleted the user's own hooks.**
-  Cursor entries are `{command}`, Copilot entries are `{type, bash}` — neither
-  carries a `hooks` array, and the cleaner assumed every entry had one. Flat
-  entries are now preserved unless they are ours.
-- **Fixed: the state file had no lock.** Eight hooks firing at once left only
-  three of eight session counters on disk — a lost update that can let the
-  nudge caps be exceeded. The read-modify-write now happens under an advisory
-  lock; the same test now keeps 8/8.
-- **Fixed: the JS/TS adapters passed the reply as a command-line argument**,
-  which puts the user's conversation in `/proc/<pid>/cmdline` (readable by
-  every process on the machine) and breaks on very long replies. The text now
-  goes over stdin (`hookctl.py --text -`).
-- **Fixed: a question mark inside code was a question.** Ternaries and
-  optional chaining in a code block or inline code no longer trigger.
-- **Fixed: the English exclusion list was thinner than the Chinese one** —
-  an English agent could talk itself into a payment, a deletion or a publish.
-- **Patch mode is generated now.** `patch-mode/continue_hook.py` was a second,
-  hand-maintained copy of the detector with its own patterns, its own key
-  names and a hardcoded `~/moneymaker/state/…` log path. It is generated from
-  the shared engine by `scripts/build-patch-mode.py`, and the build fails
-  when the generated file is stale.
-- The DeepSeek Harness test now installs the shared decision service into
-  its fixture — it used to pass while the plugin would have done nothing.
-
-- **Fixed (release blocker): the Hermes plugin never fired.** Hermes calls
-  lifecycle hooks with keyword arguments only (`response_text=…`), and the
-  plugin's observer took a required positional `text` — so every call raised
-  TypeError, the hook stored nothing, and the plugin silently did nothing.
-  The callback now accepts the real call shape, and a test calls the hooks
-  exactly the way `agent/turn_finalizer.py` does.
-- **Fixed (release blocker): the installer never copied the adapters' shared
-  transport module**, so every installed shell hook failed to import and
-  failed open — installed and doing nothing. The installer now copies it,
-  and a test drives an *installed* hook end-to-end.
-- **Fixed: the plugin injected with `origin=True`**, which the host rejects
-  (it wants a mapping) — and which also broke the CLI path, where no target
-  must be passed at all. A rejected injection is now recorded in the event
-  log instead of disappearing.
-- **Fixed: a question mark inside a URL counted as a question**, so a reply
-  ending with a link looked like it was asking permission.
-
-- DeepSeek Harness (dsh) support as a **native Cordis plugin**
-  (`adapters/dsh/`): hooks `agent/turn-stopping`, reads the reply from
-  `agent.session.deriveMessages()`, and continues with
-  `agent.steer(createUserMessage(...))`.
-- `adapters/dsh/typecheck.sh` compiles the plugin against the real
-  `@deepseek-ai/dsh-*` packages, so API drift fails the build.
-- `install.sh dsh` stages the plugin, its bundle manifest and its cordis patch;
-  `install.sh skills` now also covers `~/.dsh/skills`.
-- Documented why dsh's Claude Code bridge cannot carry continue-hook: its Stop
-  payload has no `last_assistant_message` and an empty `transcript_path`, and it
-  applies no block cap (dsh discussion #1521).
-- Tests: 16 dsh contract + detector-CLI tests.
-
-## 1.3.0 (2026-10-28)
-
 - **One decision service.** `hookctl.py` now owns the caps, the per-session
   state and the event log; `detector.py` is pure pattern matching. The Hermes
   plugin, the six shell-hook adapters, the OpenCode plugin, the Pi extension
@@ -126,3 +70,58 @@ Multi-agent support, modelled on the per-harness manifest pattern used by
 - Loop safety: per-turn nudge cap + per-session cooldown; boundary exclusions.
 - Observability: full evaluation log (denominator included), `/ch-stats`, `/ch-test`,
   `dry_run` rollout mode.
+
+- **Fixed: installing the Cursor/Copilot hook deleted the user's own hooks.**
+  Cursor entries are `{command}`, Copilot entries are `{type, bash}` — neither
+  carries a `hooks` array, and the cleaner assumed every entry had one. Flat
+  entries are now preserved unless they are ours.
+- **Fixed: the state file had no lock.** Eight hooks firing at once left only
+  three of eight session counters on disk — a lost update that can let the
+  nudge caps be exceeded. The read-modify-write now happens under an advisory
+  lock; the same test now keeps 8/8.
+- **Fixed: the JS/TS adapters passed the reply as a command-line argument**,
+  which puts the user's conversation in `/proc/<pid>/cmdline` (readable by
+  every process on the machine) and breaks on very long replies. The text now
+  goes over stdin (`hookctl.py --text -`).
+- **Fixed: a question mark inside code was a question.** Ternaries and
+  optional chaining in a code block or inline code no longer trigger.
+- **Fixed: the English exclusion list was thinner than the Chinese one** —
+  an English agent could talk itself into a payment, a deletion or a publish.
+- **Patch mode is generated now.** `patch-mode/continue_hook.py` was a second,
+  hand-maintained copy of the detector with its own patterns, its own key
+  names and a hardcoded `~/moneymaker/state/…` log path. It is generated from
+  the shared engine by `scripts/build-patch-mode.py`, and the build fails
+  when the generated file is stale.
+- The DeepSeek Harness test now installs the shared decision service into
+  its fixture — it used to pass while the plugin would have done nothing.
+
+- **Fixed (release blocker): the Hermes plugin never fired.** Hermes calls
+  lifecycle hooks with keyword arguments only (`response_text=…`), and the
+  plugin's observer took a required positional `text` — so every call raised
+  TypeError, the hook stored nothing, and the plugin silently did nothing.
+  The callback now accepts the real call shape, and a test calls the hooks
+  exactly the way `agent/turn_finalizer.py` does.
+- **Fixed (release blocker): the installer never copied the adapters' shared
+  transport module**, so every installed shell hook failed to import and
+  failed open — installed and doing nothing. The installer now copies it,
+  and a test drives an *installed* hook end-to-end.
+- **Fixed: the plugin injected with `origin=True`**, which the host rejects
+  (it wants a mapping) — and which also broke the CLI path, where no target
+  must be passed at all. A rejected injection is now recorded in the event
+  log instead of disappearing.
+- **Fixed: a question mark inside a URL counted as a question**, so a reply
+  ending with a link looked like it was asking permission.
+
+- DeepSeek Harness (dsh) support as a **native Cordis plugin**
+  (`adapters/dsh/`): hooks `agent/turn-stopping`, reads the reply from
+  `agent.session.deriveMessages()`, and continues with
+  `agent.steer(createUserMessage(...))`.
+- `adapters/dsh/typecheck.sh` compiles the plugin against the real
+  `@deepseek-ai/dsh-*` packages, so API drift fails the build.
+- `install.sh dsh` stages the plugin, its bundle manifest and its cordis patch;
+  `install.sh skills` now also covers `~/.dsh/skills`.
+- Documented why dsh's Claude Code bridge cannot carry continue-hook: its Stop
+  payload has no `last_assistant_message` and an empty `transcript_path`, and it
+  applies no block cap (dsh discussion #1521).
+- Tests: 16 dsh contract + detector-CLI tests.
+
