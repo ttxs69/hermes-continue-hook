@@ -16,12 +16,11 @@ are never imported by anything else.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import unittest
 from pathlib import Path
-
-import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
@@ -45,19 +44,29 @@ class TestThePythonComplexityGate(unittest.TestCase):
     """ruff's C901, configured in pyproject.toml."""
 
     def setUp(self) -> None:
-        self.config = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
-        self.lint = self.config["tool"]["ruff"]["lint"]
+        # tomllib is 3.11+, and this suite runs on 3.10. Reading two values out
+        # of pyproject.toml with a regex is enough, and it keeps the test able
+        # to run everywhere the suite runs.
+        self.text = PYPROJECT.read_text(encoding="utf-8")
 
     def test_the_mccabe_rule_is_enabled(self) -> None:
-        self.assertIn("C90", self.lint["select"])
+        select = re.search(r"^select\s*=\s*\[(.*?)\]", self.text, re.M | re.S)
+        self.assertIsNotNone(select, "no [tool.ruff.lint] select list found")
+        self.assertIn("C90", select.group(1))
 
     def test_the_ceiling_is_a_number_and_not_a_no_op(self) -> None:
-        limit = self.lint["mccabe"]["max-complexity"]
-        self.assertIsInstance(limit, int)
+        match = re.search(r"^max-complexity\s*=\s*(\d+)", self.text, re.M)
+        self.assertIsNotNone(match, "no max-complexity found in pyproject.toml")
+        limit = int(match.group(1))
         # A threshold nobody can fail is not a gate. Ten is the value this
         # repository measured its own code against.
         self.assertLessEqual(limit, 10)
         self.assertGreaterEqual(limit, 5)
+
+    def _limit(self) -> int:
+        match = re.search(r"^max-complexity\s*=\s*(\d+)", self.text, re.M)
+        assert match is not None
+        return int(match.group(1))
 
     def test_a_function_over_the_ceiling_is_actually_reported(self) -> None:
         """A deliberately complex function must be flagged."""
@@ -85,7 +94,7 @@ class TestThePythonComplexityGate(unittest.TestCase):
                     "--select",
                     "C901",
                     "--config",
-                    f"lint.mccabe.max-complexity={self.lint['mccabe']['max-complexity']}",
+                    f"lint.mccabe.max-complexity={self._limit()}",
                     "--output-format",
                     "json",
                     str(source),

@@ -46,9 +46,8 @@ const HOME = mkdtempSync(path.join(tmpdir(), "ch-oc-"));
 mkdirSync(path.join(HOME, ".hermes"), { recursive: true });
 process.env.HOME = HOME;
 
-const { handleIdle, lastAssistantText, ContinueHookPlugin } = await import(
-  path.join(REPO, "adapters", "opencode", "continue-hook.js")
-);
+const { handleIdle, lastAssistantText, sessionIdOf, idleVerdict, ContinueHookPlugin } =
+  await import(path.join(REPO, "adapters", "opencode", "continue-hook.js"));
 
 const ASK = "要不要我顺便也把示例补上？";
 const PLAIN = "已完成，验证通过。";
@@ -200,4 +199,68 @@ it("detector CLI agrees with the python engine", () => {
   });
   const parsed = JSON.parse(out.trim());
   assert.strictEqual(parsed.should_nudge, true);
+});
+
+it("sessionIdOf reads both the v2 and the v1 field", () => {
+  assert.strictEqual(sessionIdOf({ properties: { sessionID: "a" } }), "a");
+  assert.strictEqual(sessionIdOf({ properties: { info: { id: "b" } } }), "b");
+  assert.strictEqual(sessionIdOf({}), "");
+  assert.strictEqual(sessionIdOf(undefined), "");
+});
+
+it("idleVerdict is pure — it decides, it does not send", () => {
+  // Empty text: nothing to judge, and no nudge.
+  assert.strictEqual(idleVerdict("", "s").nudged, false);
+  assert.strictEqual(idleVerdict("", "s").reason, "empty");
+});
+
+it("idleVerdict says no when the reply is not asking", () => {
+  writeFileSync(
+    path.join(HOME, ".hermes", "continue_hook.json"),
+    JSON.stringify({ cooldown_seconds: 0 }),
+  );
+  const decision = idleVerdict("done. everything is fine.", "s-pure");
+  assert.strictEqual(decision.nudged, false);
+  assert.ok(decision.reason.length > 0);
+});
+
+it("the v1 message shape is used when v2 throws", async () => {
+  writeFileSync(
+    path.join(HOME, ".hermes", "continue_hook.json"),
+    JSON.stringify({ cooldown_seconds: 0 }),
+  );
+  // v2 (path:{id}) throws; v1 (sessionID:) answers. Only the second call can
+  // succeed, so a missing fallback shows up as "no_messages".
+  const client = {
+    session: {
+      messages: async (arg) => {
+        if (arg.path) throw new Error("v2 shape not supported");
+        return [assistant(ASK)];
+      },
+      prompt: async () => {},
+    },
+  };
+  const res = await handleIdle(client, { properties: { sessionID: "s-v1" } });
+  assert.strictEqual(res.nudged, true);
+});
+
+it("a client that answers neither shape reports no_messages", async () => {
+  const client = {
+    session: {
+      messages: async () => {
+        throw new Error("nope");
+      },
+      prompt: async () => {},
+    },
+  };
+  const res = await handleIdle(client, { properties: { sessionID: "s-none" } });
+  assert.strictEqual(res.nudged, false);
+  assert.strictEqual(res.reason, "no_messages");
+});
+
+it("an idle event without a session id is skipped, not crashed", async () => {
+  const { client } = mockClient([assistant(ASK)]);
+  const res = await handleIdle(client, {});
+  assert.strictEqual(res.nudged, false);
+  assert.strictEqual(res.reason, "no_session");
 });
