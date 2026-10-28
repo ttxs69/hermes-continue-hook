@@ -96,19 +96,28 @@ writeFileSync(
 // mid-job, so the two can differ — and then the install lands somewhere the
 // test does not look.
 const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
+// npm must not read the *outer* configuration for this install.
+//
+// The release workflow runs `npm publish`, and npm's own configuration there
+// points its prefix at the repository root (`npm prefix` printed
+// /home/runner/work/hermes-continue-hook/hermes-continue-hook). With that
+// in effect, the install below put the packages into the repository's
+// node_modules instead of the scratch directory — npm reported "added 17
+// packages", and the scratch directory stayed empty, so the test died on a
+// missing file rather than on a broken install.
+//
+// So: an explicit userconfig (an npmrc with only the registry), and
+// `--location=project` so npm installs into the current directory rather
+// than wherever its prefix points.
+const NPMRC = path.join(WORK, ".npmrc");
+writeFileSync(NPMRC, "registry=https://registry.npmjs.org/\n");
 execFileSync(
   NPM,
   [
     "install",
-    // --prefix pins the install location. Without it npm resolves the install
-    // itself and may land somewhere else — it walks up looking for a
-    // package.json. The failure mode is silent and nasty: npm reports
-    // "added 17 packages" while the directory it was supposed to fill stays
-    // empty, so the test dies on a missing file instead of on a broken
-    // install. The release workflow's mid-job npm upgrade is what exposed
-    // this — it was the only job where the install landed elsewhere.
-    "--prefix",
-    WORK,
+    "--userconfig",
+    NPMRC,
+    "--location=project",
     "--no-package-lock",
     "--no-audit",
     "--no-fund",
