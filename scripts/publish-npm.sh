@@ -1,67 +1,119 @@
 #!/usr/bin/env bash
-# Publish the current version to npm through CI.
+# Release a version to npm, through CI.
 #
-#   ./scripts/publish-npm.sh            # tag + push → CI publishes
-#   ./scripts/publish-npm.sh --dry-run  # ask CI to pack only
+#   ./scripts/publish-npm.sh patch        # 1.3.1 → 1.3.2
+#   ./scripts/publish-npm.sh minor        # 1.3.2 → 1.4.0
+#   ./scripts/publish-npm.sh major        # 1.4.0 → 2.0.0
+#   ./scripts/publish-npm.sh --version X.Y.Z
+#   ./scripts/publish-npm.sh --dry-run    # ask CI to pack only
 #
-# What has to be true before this works:
-#   1. The npm package exists — npm's trusted publishing (OIDC) refuses to
-#      publish a package that does not exist yet, so the FIRST release needs
-#      an automation token in the repository secret NPM_TOKEN.
-#      After that one release, trusted publishing takes over and the secret
-#      can be removed.
-#   2. The tag matches package.json — the workflow's version gate refuses a
-#      tag that does not.
+# The order follows the OpenJS Foundation's secure-release guidance:
+#
+#   1. safety checks   — a clean tree, the whole gate green
+#   2. prepare         — the version bump, the changelog entry
+#   3. publish         — a human says which version; CI does the publishing
+#
+# Step 3 is the important one: the publish happens only after an explicit
+# request (a pushed semver tag), never automatically, and never on a merge to
+# the default branch.
+#
+# Nothing here needs a credential. The workflow authenticates with the CI
+# provider's OIDC identity (npm trusted publishing), so the repository holds
+# no npm token and the release carries a provenance attestation.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION=$(node -p "require('./package.json').version")
-TAG="v${VERSION}"
+BUMP=""
+EXPLICIT=""
+DRY_RUN=0
+for arg in "$@"; do
+  case "$arg" in
+    patch|minor|major) BUMP="$arg" ;;
+    --version) shift; EXPLICIT="${1:-}" ;;
+    --dry-run) DRY_RUN=1 ;;
+    *) echo "unknown argument: $arg" >&2; exit 2 ;;
+  esac
+  shift || true
+done
 
-if [ "${1:-}" = "--dry-run" ]; then
-  echo "→ asking CI for a dry run of ${VERSION}"
+say() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
+die() { printf '\n\033[31m!! %s\033[0m\n' "$1" >&2; exit 1; }
+
+CURRENT=$(node -p "require('./package.json').version")
+
+# ── 1. safety checks ────────────────────────────────────────────────────────
+say "1. safety checks"
+
+if [ -n "$(git status --porcelain)" ]; then
+  die "the working tree is not clean. Commit or stash first:
+$(git status --short)"
+fi
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
+  die "releases are cut from main, not $(git rev-parse --abbrev-ref HEAD)"
+fi
+git fetch --quiet origin main
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+  die "main is not in sync with origin/main. Push first."
+fi
+echo "   tree clean, on main, in sync with origin"
+
+# The gate that decides whether the code is fit to ship. It is the same gate
+# CI runs, and it is also wired as `prepublishOnly`, so a package published by
+# any other route is checked too.
+say "1b. the full gate"
+./scripts/check.sh
+echo "   gate green"
+
+# ── 2. prepare ──────────────────────────────────────────────────────────────
+if [ "$DRY_RUN" = "1" ]; then
+  say "2. dry run — asking CI to pack ${CURRENT} without publishing"
   gh workflow run publish.yml -f dry-run=true
   echo "✓ watch it: gh run list --workflow publish.yml"
   exit 0
 fi
 
-if ! gh secret list | grep -q '^NPM_TOKEN'; then
-  echo "✗ the repository has no NPM_TOKEN secret."
-  echo
-  echo "  The first npm release cannot use OIDC (npm requires the package to"
-  echo "  exist first), so it needs a token:"
-  echo
-  echo "    1. create an npm account:      https://www.npmjs.com/signup"
-  echo "    2. turn on 2FA (auth-and-writes)"
-  echo "    3. create a token:             https://www.npmjs.com/settings/ttxs69/access-tokens"
-  echo "       npm removed legacy automation tokens in Nov 2025 — create a"
-  echo "       Granular Access Token with:"
-  echo "         Packages and scopes → Read and write (publish and stage)"
-  echo "         Select Packages        → All Packages (the package does not"
-  echo "                                   exist yet, so it cannot be picked)"
-  echo "         Bypass 2FA             → on"
-  echo "         Expiration             → as short as possible"
-  echo "    4. store it:                    gh secret set NPM_TOKEN"
-  echo
-  echo "  Then re-run this script. For later releases, configure trusted"
-  echo "  publishing once and drop the secret (needs npm >= 11.15.0):"
-  echo
-  echo "    npm trust github @ttxs69/hermes-continue-hook \\"
-  echo "      --repo ttxs69/hermes-continue-hook --file publish.yml --env npm \\"
-  echo "      --allow-publish --registry=https://registry.npmjs.org/"
-  echo
-  echo "  Note: a token with bypass-2FA may NOT configure a trusted publisher —"
-  echo "  that call needs an interactive 2FA challenge."
-  exit 2
+say "2. bumping the version"
+if [ -n "$EXPLICIT" ]; then
+  npm version "$EXPLICIT" --no-git-tag-version
+elif [ -n "$BUMP" ]; then
+  npm version "$BUMP" --no-git-tag-version
+else
+  die "say what kind of release this is: patch, minor, major, or --version X.Y.Z"
 fi
+
+VERSION=$(node -p "require('./package.json').version")
+TAG="v${VERSION}"
+echo "   ${CURRENT} → ${VERSION}"
 
 if git rev-parse "$TAG" >/dev/null 2>&1; then
-  echo "✗ tag $TAG already exists locally — move it first:"
-  echo "    git tag -d $TAG && git push --delete origin $TAG"
-  exit 3
+  git checkout -- . 2>/dev/null || true
+  die "tag $TAG already exists — pick another version"
 fi
 
-echo "→ tagging $TAG"
+# The changelog entry is created by the version hook; it is a placeholder, so
+# it has to be written before the commit. The release is not ready until the
+# entry says what changed.
+say "2b. the changelog entry"
+if grep -q "^## ${VERSION}" CHANGELOG.md; then
+  echo "   a section for ${VERSION} exists — edit it to say what changed:"
+  echo
+  sed -n "/^## ${VERSION}/,/^## /p" CHANGELOG.md | head -20
+  echo
+  read -r -p "   press Enter to accept, or Ctrl-C to stop: " _
+fi
+
+git add -A
+git commit -q -m "release: ${VERSION}
+
+$(sed -n "/^## ${VERSION}/,/^## /p" CHANGELOG.md | sed '1d;$d' | sed '/^$/d' | head -20)"
+
+# ── 3. publish ──────────────────────────────────────────────────────────────
+say "3. tagging and pushing"
+echo "   → tagging ${TAG}"
 git tag -a "$TAG" -m "continue-hook ${VERSION}"
+git push origin main
 git push origin "$TAG"
-echo "✓ pushed $TAG — CI will publish it: gh run list --workflow publish.yml"
+echo
+echo "✓ pushed ${TAG} — CI will publish it."
+echo "  watch:  gh run list --workflow publish.yml"
+echo "  verify: npm view @ttxs69/hermes-continue-hook versions --json"
