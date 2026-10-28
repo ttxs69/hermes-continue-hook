@@ -64,7 +64,11 @@ function shouldNudge(text, sessionId) {
   if (res.status !== 0) return { nudge: false, reason: "hookctl_failed" };
   try {
     const out = JSON.parse((res.stdout || "").trim());
-    return { nudge: Boolean(out.should_nudge), reason: out.reason || "unknown", nudgeText: out.nudge };
+    return {
+      nudge: Boolean(out.should_nudge),
+      reason: out.reason || "unknown",
+      nudgeText: out.nudge,
+    };
   } catch {
     return { nudge: false, reason: "hookctl_bad_output" };
   }
@@ -144,7 +148,9 @@ export const ContinueHookPlugin = async ({ client }) => {
           console.error(`continue-hook: ${result.reason}`);
         }
       } catch (err) {
-        console.error(`continue-hook: adapter error: ${err && err.message ? err.message : err}`);
+        console.error(
+          `continue-hook: adapter error: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     },
   };

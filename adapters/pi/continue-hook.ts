@@ -80,7 +80,10 @@ export function lastAssistantText(messages: any[]): string {
   return "";
 }
 
-function shouldNudge(text: string, sessionId: string): { nudge: boolean; reason: string; nudgeText?: string } {
+function shouldNudge(
+  text: string,
+  sessionId: string,
+): { nudge: boolean; reason: string; nudgeText?: string } {
   if (!HOOKCTL || !text.trim()) return { nudge: false, reason: "no_hookctl" };
   const res = spawnSync(
     "python3",
@@ -92,7 +95,11 @@ function shouldNudge(text: string, sessionId: string): { nudge: boolean; reason:
   if (res.status !== 0) return { nudge: false, reason: "hookctl_failed" };
   try {
     const out = JSON.parse((res.stdout ?? "").trim());
-    return { nudge: Boolean(out.should_nudge), reason: out.reason ?? "unknown", nudgeText: out.nudge };
+    return {
+      nudge: Boolean(out.should_nudge),
+      reason: out.reason ?? "unknown",
+      nudgeText: out.nudge,
+    };
   } catch {
     return { nudge: false, reason: "hookctl_bad_output" };
   }

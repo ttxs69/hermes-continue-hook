@@ -1,3 +1,33 @@
+import { expect, it } from "vitest";
+
+/**
+ * A `node:assert` look-alike on top of Vitest's `expect`.
+ *
+ * The test bodies are the valuable part — every message and edge case came from
+ * a review round — so they stay verbatim, and the runner, reporting and
+ * coverage come from Vitest.
+ */
+const assert = {
+  ok(value, message) {
+    expect(Boolean(value), message).toBe(true);
+  },
+  strictEqual(actual, expected, message) {
+    expect(actual, message).toBe(expected);
+  },
+  notStrictEqual(actual, expected, message) {
+    expect(actual, message).not.toBe(expected);
+  },
+  deepStrictEqual(actual, expected, message) {
+    expect(actual, message).toEqual(expected);
+  },
+  match(value, pattern, message) {
+    expect(value, message).toMatch(pattern);
+  },
+  doesNotMatch(value, pattern, message) {
+    expect(value, message).not.toMatch(pattern);
+  },
+};
+
 /**
  * OpenCode plugin tests — mocked OpenCode SDK client, real Python detector.
  *
@@ -6,7 +36,6 @@
  * The plugin is imported directly, so the test exercises the same code path
  * OpenCode would run: session.idle → read messages → detect → prompt.
  */
-import assert from "node:assert";
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -43,20 +72,6 @@ function mockClient(messages, { failPrompt = false } = {}) {
   };
 }
 
-let passed = 0;
-function test(name, fn) {
-  return Promise.resolve()
-    .then(fn)
-    .then(() => {
-      passed++;
-      console.log(`  ok  ${name}`);
-    })
-    .catch((err) => {
-      console.error(`FAIL  ${name}\n      ${err.message}`);
-      process.exitCode = 1;
-    });
-}
-
 function assistant(text) {
   return { info: { role: "assistant" }, parts: [{ type: "text", text }] };
 }
@@ -64,17 +79,17 @@ function user(text) {
   return { info: { role: "user" }, parts: [{ type: "text", text }] };
 }
 
-await test("lastAssistantText picks the newest assistant message", () => {
+it("lastAssistantText picks the newest assistant message", () => {
   const text = lastAssistantText([user("hi"), assistant("older"), assistant("newest")]);
   assert.strictEqual(text, "newest");
 });
 
-await test("lastAssistantText ignores user-only lists", () => {
+it("lastAssistantText ignores user-only lists", () => {
   assert.strictEqual(lastAssistantText([user("hi")]), "");
   assert.strictEqual(lastAssistantText(null), "");
 });
 
-await test("permission-seeking ending triggers exactly one continuation", async () => {
+it("permission-seeking ending triggers exactly one continuation", async () => {
   const { client, calls } = mockClient([user("go"), assistant(ASK)]);
   const res = await handleIdle(client, { properties: { sessionID: "s1" } });
   assert.strictEqual(res.nudged, true);
@@ -84,7 +99,7 @@ await test("permission-seeking ending triggers exactly one continuation", async 
   assert.ok(text.includes("continue-hook"));
 });
 
-await test("the registered session.idle handler actually nudges", async () => {
+it("the registered session.idle handler actually nudges", async () => {
   // Every other test calls handleIdle() directly — which is why a ReferenceError
   // inside the *registered* handler (a leftover `state` argument after the
   // debounce was removed) passed CI while OpenCode could never fire at all.
@@ -94,35 +109,35 @@ await test("the registered session.idle handler actually nudges", async () => {
   assert.strictEqual(calls.prompts.length, 1, "the handler must prompt exactly once");
 });
 
-await test("the registered handler stays silent for a clean reply", async () => {
+it("the registered handler stays silent for a clean reply", async () => {
   const { client, calls } = mockClient([assistant(PLAIN)]);
   const plugin = await ContinueHookPlugin({ client });
   await plugin.event({ event: { type: "session.idle", properties: { sessionID: "h2" } } });
   assert.strictEqual(calls.prompts.length, 0);
 });
 
-await test("the registered handler ignores other event types", async () => {
+it("the registered handler ignores other event types", async () => {
   const { client, calls } = mockClient([assistant(ASK)]);
   const plugin = await ContinueHookPlugin({ client });
   await plugin.event({ event: { type: "session.updated", properties: { sessionID: "h3" } } });
   assert.strictEqual(calls.prompts.length, 0);
 });
 
-await test("declarative ending does not continue", async () => {
+it("declarative ending does not continue", async () => {
   const { client, calls } = mockClient([assistant(PLAIN)]);
   const res = await handleIdle(client, { properties: { sessionID: "s2" } });
   assert.strictEqual(res.nudged, false);
   assert.strictEqual(calls.prompts.length, 0);
 });
 
-await test("boundary question is not nudged", async () => {
+it("boundary question is not nudged", async () => {
   const { client, calls } = mockClient([assistant("这会花 $69，需要你批准后我才买。")]);
   const res = await handleIdle(client, { properties: { sessionID: "s3" } });
   assert.strictEqual(res.nudged, false);
   assert.strictEqual(calls.prompts.length, 0);
 });
 
-await test("a repeated idle is recorded by the engine, not silently debounced", async () => {
+it("a repeated idle is recorded by the engine, not silently debounced", async () => {
   // The plugin used to hold a 1.5 s window of its own and return "debounce"
   // without logging anything, so the event log could not be used as a
   // denominator for "each evaluation is appended".
@@ -137,12 +152,14 @@ await test("a repeated idle is recorded by the engine, not silently debounced", 
   assert.strictEqual(second.nudged, false);
   assert.strictEqual(second.reason, "max_nudges");
   const events = readFileSync(path.join(HOME, ".hermes", "continue-hook-events.jsonl"), "utf8")
-    .trim().split("\n").map((l) => JSON.parse(l));
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
   const forS5 = events.filter((e) => e.session === "s5");
   assert.strictEqual(forS5.length, 2, "both evaluations must be recorded");
 });
 
-await test("max nudges per turn is respected", async () => {
+it("max nudges per turn is respected", async () => {
   const { client, calls } = mockClient([assistant(ASK)]);
   writeFileSync(
     path.join(HOME, ".hermes", "continue_hook.json"),
@@ -155,7 +172,7 @@ await test("max nudges per turn is respected", async () => {
   assert.strictEqual(calls.prompts.length, 1);
 });
 
-await test("dry_run never continues", async () => {
+it("dry_run never continues", async () => {
   writeFileSync(
     path.join(HOME, ".hermes", "continue_hook.json"),
     JSON.stringify({ dry_run: true, cooldown_seconds: 0 }),
@@ -166,7 +183,7 @@ await test("dry_run never continues", async () => {
   assert.strictEqual(calls.prompts.length, 0);
 });
 
-await test("failed prompt is reported, not thrown", async () => {
+it("failed prompt is reported, not thrown", async () => {
   writeFileSync(
     path.join(HOME, ".hermes", "continue_hook.json"),
     JSON.stringify({ cooldown_seconds: 0 }),
@@ -177,14 +194,10 @@ await test("failed prompt is reported, not thrown", async () => {
   assert.strictEqual(res.reason, "prompt_failed");
 });
 
-await test("detector CLI agrees with the python engine", () => {
-  const out = execFileSync("python3", [
-    path.join(REPO, "detector.py"),
-    "--text",
-    ASK,
-  ], { encoding: "utf8" });
+it("detector CLI agrees with the python engine", () => {
+  const out = execFileSync("python3", [path.join(REPO, "detector.py"), "--text", ASK], {
+    encoding: "utf8",
+  });
   const parsed = JSON.parse(out.trim());
   assert.strictEqual(parsed.should_nudge, true);
 });
-
-console.log(`\n${passed} opencode plugin test(s) passed`);

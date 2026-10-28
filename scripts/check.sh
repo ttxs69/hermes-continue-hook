@@ -22,16 +22,20 @@ python3 -m unittest discover -s tests
 echo "== pytest (same suite, with the coverage floor)"
 ${PYTEST:-python3 -m pytest} --cov --cov-report=term-missing
 
-echo "== node tests"
-node tests/test_opencode.mjs
-node tests/test_installer.mjs
-node tests/test_lifecycle.mjs
-
 echo "== eslint"
 npx --no-install eslint .
 
-echo "== tsc (Pi extension)"
-npx --no-install tsc -p tsconfig.pi.json
+echo "== prettier"
+npx --no-install prettier --check '**/*.{js,mjs,ts,json,yml}'
+
+echo "== tsc (Pi extension, strict)"
+npx --no-install tsc -p tsconfig.json
+
+echo "== tsc (JavaScript, checkJs)"
+npx --no-install tsc -p tsconfig.checkjs.json
+
+echo "== vitest (with the coverage floor)"
+npx --no-install vitest run --coverage
 
 echo "== npm pack (contents)"
 npm pack --dry-run > /dev/null

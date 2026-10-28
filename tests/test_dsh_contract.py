@@ -39,13 +39,13 @@ class TestDshPluginContract(unittest.TestCase):
 
     def test_exports_cordis_plugin_surface(self):
         """A dsh plugin exports name / inject / apply."""
-        self.assertRegex(self.src, r"export const name = 'continue-hook'")
+        self.assertRegex(self.src, r"""export const name = ['"]continue-hook['"]""")
         self.assertRegex(self.src, r"export (?:function|const) apply")
         self.assertRegex(self.src, r"export const inject")
 
     def test_hooks_the_turn_stopping_event(self):
         """agent/turn-stopping is dsh's documented turn-close boundary."""
-        self.assertIn("ctx.on('agent/turn-stopping'", self.src)
+        self.assertRegex(self.src, r"""ctx\.on\(\s*['"]agent/turn-stopping['"]""")
 
     def test_steers_to_continue(self):
         """Steering is how a listener makes the machine run one more step."""
@@ -75,7 +75,7 @@ class TestDshPluginContract(unittest.TestCase):
 
     def test_plugin_source_is_declared(self):
         """The message source must be a real dsh source variant."""
-        self.assertIn("kind: 'plugin'", self.src)
+        self.assertRegex(self.src, r"""kind:\s*['"]plugin['"]""")
 
 
 class TestDshPackaging(unittest.TestCase):
@@ -92,7 +92,7 @@ class TestDshPackaging(unittest.TestCase):
         text = (DSH / "cordis.patch.yml").read_text(encoding="utf-8")
         self.assertIn("- insert:", text)
         self.assertIn("id: continue-hook", text)
-        self.assertIn("name: 'continue-hook'", text)
+        self.assertRegex(text, r"""name:\s*['"]continue-hook['"]""")
 
     def test_tsconfig_targets_esm_and_strict(self):
         cfg = json.loads((DSH / "tsconfig.json").read_text(encoding="utf-8"))

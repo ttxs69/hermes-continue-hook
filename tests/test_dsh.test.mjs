@@ -1,3 +1,5 @@
+import { it } from "vitest";
+
 /**
  * Runtime test for the DeepSeek Harness (dsh) plugin.
  *
@@ -13,7 +15,7 @@
  *   node tests/test_dsh.mjs
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, cpSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,9 +34,16 @@ console.log("installing dsh packages + typescript …");
 execFileSync(
   "npm",
   [
-    "i", "--no-save", "--no-audit", "--no-fund",
-    "@deepseek-ai/dsh-agent", "@deepseek-ai/dsh-llm", "@deepseek-ai/dsh-session",
-    "@deepseek-ai/cordis", "typescript", "@types/node",
+    "i",
+    "--no-save",
+    "--no-audit",
+    "--no-fund",
+    "@deepseek-ai/dsh-agent",
+    "@deepseek-ai/dsh-llm",
+    "@deepseek-ai/dsh-session",
+    "@deepseek-ai/cordis",
+    "typescript",
+    "@types/node",
   ],
   { cwd: WORK, stdio: "ignore" },
 );
@@ -111,21 +120,7 @@ function runTurn(reply, { sessionId = "s1", config = {} } = {}) {
   return steered;
 }
 
-let passed = 0;
-let failed = 0;
-async function test(name, fn) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  ok  ${name}`);
-  } catch (err) {
-    failed++;
-    console.error(`FAIL  ${name}\n      ${err.message}`);
-    process.exitCode = 1;
-  }
-}
-
-await test("lastAssistantText reads the newest assistant message", () => {
+it("lastAssistantText reads the newest assistant message", () => {
   const text = lastAssistantText([
     { role: "user", content: [{ type: "text", text: "hi" }] },
     { role: "assistant", content: [{ type: "text", text: "older" }] },
@@ -134,7 +129,7 @@ await test("lastAssistantText reads the newest assistant message", () => {
   if (text !== "newest") throw new Error(`got ${JSON.stringify(text)}`);
 });
 
-await test("permission-seeking ending steers one continuation", () => {
+it("permission-seeking ending steers one continuation", () => {
   const steered = runTurn("要不要我顺便也把示例补上？");
   if (steered.length !== 1) throw new Error(`expected 1 steer, got ${steered.length}`);
   const text = steered[0].content[0].text;
@@ -142,17 +137,17 @@ await test("permission-seeking ending steers one continuation", () => {
   if (steered[0].role !== "user") throw new Error(`role is ${steered[0].role}`);
 });
 
-await test("declarative ending does not steer", () => {
+it("declarative ending does not steer", () => {
   const steered = runTurn("已完成，验证通过。", { sessionId: "s2" });
   if (steered.length !== 0) throw new Error(`expected 0 steers, got ${steered.length}`);
 });
 
-await test("boundary question does not steer", () => {
+it("boundary question does not steer", () => {
   const steered = runTurn("这会花 $69，需要你批准后我才买。", { sessionId: "s3" });
   if (steered.length !== 0) throw new Error(`expected 0 steers, got ${steered.length}`);
 });
 
-await test("the per-turn cap is enforced", () => {
+it("the per-turn cap is enforced", () => {
   const steered = runTurn("要不要我继续？", {
     sessionId: "s4",
     config: { max_nudges_per_turn: 1 },
@@ -160,7 +155,7 @@ await test("the per-turn cap is enforced", () => {
   if (steered.length !== 1) throw new Error(`expected 1 steer, got ${steered.length}`);
 });
 
-await test("dry_run never steers", () => {
+it("dry_run never steers", () => {
   const steered = runTurn("要不要我继续？", {
     sessionId: "s5",
     config: { dry_run: true },
@@ -168,7 +163,7 @@ await test("dry_run never steers", () => {
   if (steered.length !== 0) throw new Error(`expected 0 steers, got ${steered.length}`);
 });
 
-await test("a broken detector fails open", () => {
+it("a broken detector fails open", () => {
   // The plugin calls hookctl.py, which imports the detector sitting next to
   // it — so that is the file to break (breaking the copy in HOME would not
   // be exercised at all).
@@ -180,8 +175,3 @@ await test("a broken detector fails open", () => {
   cpSync(backup, detector);
   if (steered.length !== 0) throw new Error(`expected 0 steers, got ${steered.length}`);
 });
-
-const total = passed + failed;
-console.log(`\n${passed}/${total} dsh plugin test(s) passed`);
-if (passed !== total) process.exitCode = 1;
-if (!existsSync(path.join(WORK, "lib", "index.js"))) process.exitCode = 1;

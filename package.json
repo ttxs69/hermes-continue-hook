@@ -38,11 +38,12 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "python3 -m unittest discover -s tests && node tests/test_opencode.mjs && node tests/test_installer.mjs && node tests/test_lifecycle.mjs",
-    "test:dsh": "node tests/test_dsh.mjs",
-    "test:coverage": "python3 -m pytest --cov --cov-report=term-missing",
-    "lint": "ruff check . && ruff format --check . && npx eslint .",
-    "typecheck": "mypy && npx tsc -p tsconfig.pi.json",
+    "test": "python3 -m unittest discover -s tests && vitest run",
+    "test:py": "python3 -m unittest discover -s tests",
+    "test:js": "vitest run",
+    "test:coverage": "python3 -m pytest --cov --cov-report=term-missing && vitest run --coverage",
+    "lint": "ruff check . && ruff format --check . && eslint . && prettier --check '**/*.{js,mjs,ts,json,yml}'",
+    "typecheck": "mypy && tsc -p tsconfig.json && tsc -p tsconfig.checkjs.json",
     "check": "./scripts/check.sh",
     "prepack": "node scripts/clean-pack.mjs"
   },
@@ -65,8 +66,11 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^10.13.0",
+    "prettier": "^3.9.10",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.1"
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
   }
 }

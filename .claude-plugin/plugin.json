@@ -5,11 +5,6 @@
   "homepage": "https://github.com/ttxs69/hermes-continue-hook",
   "repository": "https://github.com/ttxs69/hermes-continue-hook",
   "license": "MIT",
-  "keywords": [
-    "hooks",
-    "stop-hook",
-    "autonomy",
-    "agent"
-  ],
+  "keywords": ["hooks", "stop-hook", "autonomy", "agent"],
   "hooks": "./hooks/hooks.json"
 }

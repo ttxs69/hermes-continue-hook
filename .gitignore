@@ -11,3 +11,6 @@ pack.json
 .coverage
 .coverage.*
 htmlcov/
+coverage/
+.pytest_cache/
+.installed.json

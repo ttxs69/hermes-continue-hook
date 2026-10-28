@@ -1,3 +1,33 @@
+import { expect, it } from "vitest";
+
+/**
+ * A `node:assert` look-alike on top of Vitest's `expect`.
+ *
+ * The test bodies are the valuable part — every message and edge case came from
+ * a review round — so they stay verbatim, and the runner, reporting and
+ * coverage come from Vitest.
+ */
+const assert = {
+  ok(value, message) {
+    expect(Boolean(value), message).toBe(true);
+  },
+  strictEqual(actual, expected, message) {
+    expect(actual, message).toBe(expected);
+  },
+  notStrictEqual(actual, expected, message) {
+    expect(actual, message).not.toBe(expected);
+  },
+  deepStrictEqual(actual, expected, message) {
+    expect(actual, message).toEqual(expected);
+  },
+  match(value, pattern, message) {
+    expect(value, message).toMatch(pattern);
+  },
+  doesNotMatch(value, pattern, message) {
+    expect(value, message).not.toMatch(pattern);
+  },
+};
+
 /**
  * Installer tests — the Node CLI that npm users run.
  *
@@ -6,9 +36,15 @@
  * The CLI is driven against a temporary HOME, so the developer's real agent
  * configuration is never touched.
  */
-import assert from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  readdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,19 +72,7 @@ function readJson(file) {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
-let passed = 0;
-async function test(name, fn) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  ok  ${name}`);
-  } catch (err) {
-    console.error(`FAIL  ${name}\n      ${err.message}`);
-    process.exitCode = 1;
-  }
-}
-
-await test("install writes a Claude Code Stop hook", () => {
+it("install writes a Claude Code Stop hook", () => {
   const home = freshHome();
   const res = runCli(["install", "--host", "claude-code"], home);
   assert.strictEqual(res.code, 0, res.out);
@@ -60,7 +84,7 @@ await test("install writes a Claude Code Stop hook", () => {
   assert.ok(cmd.includes("claude-code/stop_hook.py"), cmd);
 });
 
-await test("install is idempotent", () => {
+it("install is idempotent", () => {
   const home = freshHome();
   runCli(["install", "--host", "claude-code"], home);
   runCli(["install", "--host", "claude-code"], home);
@@ -68,7 +92,7 @@ await test("install is idempotent", () => {
   assert.strictEqual(settings.hooks.Stop.length, 1, "re-install must not duplicate");
 });
 
-await test("install keeps the user's own hooks and settings", () => {
+it("install keeps the user's own hooks and settings", () => {
   const home = freshHome();
   mkdirSync(path.join(home, ".claude"), { recursive: true });
   writeFileSync(
@@ -86,7 +110,7 @@ await test("install keeps the user's own hooks and settings", () => {
   assert.ok(blob.includes("continue-hook"), "our hook must be added");
 });
 
-await test("uninstall removes only our hook", () => {
+it("uninstall removes only our hook", () => {
   const home = freshHome();
   mkdirSync(path.join(home, ".claude"), { recursive: true });
   writeFileSync(
@@ -105,7 +129,7 @@ await test("uninstall removes only our hook", () => {
   assert.strictEqual(settings.model, "opus");
 });
 
-await test("install never deletes the user's own flat hooks", () => {
+it("install never deletes the user's own flat hooks", () => {
   // Cursor entries are {command}, Copilot entries are {type, bash} — neither
   // has a "hooks" array. A cleaner that assumed a "hooks" array dropped them,
   // which deleted the user's own hooks on install.
@@ -146,7 +170,7 @@ await test("install never deletes the user's own flat hooks", () => {
   assert.ok(after.includes("my-own-cursor-hook.sh"), "the user's hook must survive");
 });
 
-await test("a user hook that merely shares our name is not ours", () => {
+it("a user hook that merely shares our name is not ours", () => {
   // isOurs() used to match the substring "continue-hook", so a user's own
   // ~/bin/continue-hook-backup.sh was treated as our entry and deleted.
   const home = freshHome();
@@ -155,7 +179,9 @@ await test("a user hook that merely shares our name is not ours", () => {
     path.join(home, ".cursor", "hooks.json"),
     JSON.stringify({
       version: 1,
-      hooks: { stop: [{ command: "~/bin/continue-hook-backup.sh" }, { command: "my-linter --quiet" }] },
+      hooks: {
+        stop: [{ command: "~/bin/continue-hook-backup.sh" }, { command: "my-linter --quiet" }],
+      },
     }),
   );
 
@@ -171,7 +197,7 @@ await test("a user hook that merely shares our name is not ours", () => {
   assert.ok(!after.includes(".hermes/continue-hook/"), "our hook must be gone");
 });
 
-await test("uninstall removes a stale hook from a previous home directory", () => {
+it("uninstall removes a stale hook from a previous home directory", () => {
   // A user who moved their home directory still has an entry pointing at the
   // old runtime path. Uninstall has to take it with it, or two hooks fire.
   const home = freshHome();
@@ -188,7 +214,7 @@ await test("uninstall removes a stale hook from a previous home directory", () =
   assert.ok(!after.includes(".hermes/continue-hook/"), "the stale entry survived");
 });
 
-await test("every JSON host gets its own config file", () => {
+it("every JSON host gets its own config file", () => {
   // Explicitly, because "--host all" now means "the agents this machine has".
   const home = freshHome();
   const res = runCli(["install", "--host", ALL_HOSTS], home);
@@ -209,7 +235,7 @@ await test("every JSON host gets its own config file", () => {
   assert.ok(existsSync(path.join(home, ".hermes", "continue-hook", "detector.py")));
 });
 
-await test("the skills layer lands in the skill directories", () => {
+it("the skills layer lands in the skill directories", () => {
   const home = freshHome();
   runCli(["install", "--host", "skills"], home);
   for (const dir of [".claude/skills", ".cursor/skills", ".agents/skills"]) {
@@ -219,7 +245,7 @@ await test("the skills layer lands in the skill directories", () => {
   }
 });
 
-await test("--host all means the agents this machine actually has", () => {
+it("--host all means the agents this machine actually has", () => {
   // It used to mean "all ten host types": a home with one agent installed got
   // six config files and nine SKILL.md files for agents that are not there.
   const home = freshHome();
@@ -227,11 +253,18 @@ await test("--host all means the agents this machine actually has", () => {
   writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ model: "opus" }));
   const res = runCli(["install", "--host", "all"], home);
   assert.strictEqual(res.code, 0, res.out);
-  assert.ok(!existsSync(path.join(home, ".cursor", "hooks.json")),
-    "a Cursor config was invented for a host that is not installed");
-  assert.ok(!existsSync(path.join(home, ".codex", "hooks.json")),
-    "a Codex config was invented for a host that is not installed");
-  assert.ok(existsSync(path.join(home, ".claude", "settings.json")), "the detected host must be installed");
+  assert.ok(
+    !existsSync(path.join(home, ".cursor", "hooks.json")),
+    "a Cursor config was invented for a host that is not installed",
+  );
+  assert.ok(
+    !existsSync(path.join(home, ".codex", "hooks.json")),
+    "a Codex config was invented for a host that is not installed",
+  );
+  assert.ok(
+    existsSync(path.join(home, ".claude", "settings.json")),
+    "the detected host must be installed",
+  );
   const created = readdirSync(home, { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => e.name);
@@ -242,14 +275,18 @@ await test("--host all means the agents this machine actually has", () => {
   const skillDirs = created
     .filter((d) => existsSync(path.join(home, d, "skills", "continue-hook", "SKILL.md")))
     .sort();
-  assert.deepStrictEqual(skillDirs, [".agents", ".claude"], `skills went to: ${skillDirs.join(", ")}`);
+  assert.deepStrictEqual(
+    skillDirs,
+    [".agents", ".claude"],
+    `skills went to: ${skillDirs.join(", ")}`,
+  );
   const invented = created.filter(
     (d) => d.startsWith(".") && ![".agents", ".claude", ".hermes"].includes(d),
   );
   assert.deepStrictEqual(invented, [], `host directories were invented: ${invented.join(", ")}`);
 });
 
-await test("uninstall removes the runtime so nothing executable is left behind", () => {
+it("uninstall removes the runtime so nothing executable is left behind", () => {
   const home = freshHome();
   runCli(["install", "--host", "claude-code"], home);
   const runtime = path.join(home, ".hermes", "continue-hook");
@@ -258,16 +295,20 @@ await test("uninstall removes the runtime so nothing executable is left behind",
   assert.ok(!existsSync(runtime), "uninstall left executable Python behind");
 });
 
-await test("--host all on a machine with no agent says so instead of guessing", () => {
+it("--host all on a machine with no agent says so instead of guessing", () => {
   const home = freshHome();
   const res = runCli(["install", "--host", "all"], home);
   assert.notStrictEqual(res.code, 0, "should fail loudly");
   assert.match(res.out, /no supported agent found/);
   const created = readdirSync(home, { withFileTypes: true }).filter((e) => e.isDirectory());
-  assert.deepStrictEqual(created.map((e) => e.name), [], "nothing may be created");
+  assert.deepStrictEqual(
+    created.map((e) => e.name),
+    [],
+    "nothing may be created",
+  );
 });
 
-await test("uninstalling one host keeps the runtime other hosts are using", () => {
+it("uninstalling one host keeps the runtime other hosts are using", () => {
   // installedHosts() skipped file/dsh/skills hosts, so removing Claude Code
   // deleted ~/.hermes/continue-hook/ — and with it the hookctl.py that an
   // installed Pi or dsh extension locates there. Those hosts then failed
@@ -275,18 +316,22 @@ await test("uninstalling one host keeps the runtime other hosts are using", () =
   const home = freshHome();
   runCli(["install", "--host", "dsh,claude-code"], home);
   runCli(["uninstall", "--host", "claude-code"], home);
-  assert.ok(existsSync(path.join(home, ".hermes", "continue-hook", "hookctl.py")),
-    "the shared runtime was deleted while dsh still needed it");
+  assert.ok(
+    existsSync(path.join(home, ".hermes", "continue-hook", "hookctl.py")),
+    "the shared runtime was deleted while dsh still needed it",
+  );
   assert.ok(existsSync(path.join(home, ".hermes", "continue-hook", "dsh", "src", "index.ts")));
 
   const home2 = freshHome();
   runCli(["install", "--host", "pi,opencode"], home2);
   runCli(["uninstall", "--host", "opencode"], home2);
-  assert.ok(existsSync(path.join(home2, ".hermes", "continue-hook", "hookctl.py")),
-    "the Pi extension would never find hookctl again");
+  assert.ok(
+    existsSync(path.join(home2, ".hermes", "continue-hook", "hookctl.py")),
+    "the Pi extension would never find hookctl again",
+  );
 });
 
-await test("an unparsable host config is backed up, never overwritten", () => {
+it("an unparsable host config is backed up, never overwritten", () => {
   // JSON.parse failure was swallowed into {}, and the next write replaced the
   // user's settings.json — including a JSONC file with comments, which many
   // hosts accept and JSON.parse does not.
@@ -296,14 +341,21 @@ await test("an unparsable host config is backed up, never overwritten", () => {
   writeFileSync(path.join(home, ".claude", "settings.json"), original);
   const res = runCli(["install", "--host", "claude-code"], home);
   assert.strictEqual(res.code, 3, "install must refuse instead of overwriting");
-  assert.strictEqual(readFileSync(path.join(home, ".claude", "settings.json"), "utf8"), original,
-    "the original file was modified");
+  assert.strictEqual(
+    readFileSync(path.join(home, ".claude", "settings.json"), "utf8"),
+    original,
+    "the original file was modified",
+  );
   const backups = readdirSync(path.join(home, ".claude")).filter((f) => f.includes(".bak"));
   assert.strictEqual(backups.length, 1, "the original must be backed up");
-  assert.strictEqual(backups[0], "settings.json.bak", "one stable name; a timestamped one accumulated");
+  assert.strictEqual(
+    backups[0],
+    "settings.json.bak",
+    "one stable name; a timestamped one accumulated",
+  );
 });
 
-await test("the hook command survives a home directory with a space", () => {
+it("the hook command survives a home directory with a space", () => {
   const base = freshHome();
   const home = path.join(base, "John Smith");
   mkdirSync(home, { recursive: true });
@@ -311,23 +363,28 @@ await test("the hook command survives a home directory with a space", () => {
   const cmd = readJson(path.join(home, ".claude", "settings.json")).hooks.Stop[0].hooks[0].command;
   assert.ok(cmd.includes('"'), `the path must be quoted: ${cmd}`);
   // and it really runs: an unquoted path exits 2 here, which hosts read as "block"
-  const out = execFileSync("sh", ["-c",
-    `echo '{"session_id":"s","last_assistant_message":"要不要我顺便补个测试？"}' | ${cmd}`],
-    { env: { ...process.env, HOME: home }, encoding: "utf8" });
+  const out = execFileSync(
+    "sh",
+    ["-c", `echo '{"session_id":"s","last_assistant_message":"要不要我顺便补个测试？"}' | ${cmd}`],
+    { env: { ...process.env, HOME: home }, encoding: "utf8" },
+  );
   assert.ok(out.includes("decision"), "the installed hook did not run");
 });
 
-await test("check is read-only: it never writes a backup or fails on JSONC", () => {
+it("check is read-only: it never writes a backup or fails on JSONC", () => {
   const home = freshHome();
   mkdirSync(path.join(home, ".claude"), { recursive: true });
-  writeFileSync(path.join(home, ".claude", "settings.json"), '{\n  // mine\n  "model": "opus"\n}\n');
+  writeFileSync(
+    path.join(home, ".claude", "settings.json"),
+    '{\n  // mine\n  "model": "opus"\n}\n',
+  );
   const res = runCli(["check", "--host", "claude-code"], home);
   const files = readdirSync(path.join(home, ".claude"));
   assert.deepStrictEqual(files, ["settings.json"], "check wrote something");
   assert.notStrictEqual(res.code, 3, "check must not abort on an unparsable file");
 });
 
-await test("uninstall on a clean machine creates nothing", () => {
+it("uninstall on a clean machine creates nothing", () => {
   const home = freshHome();
   const res = runCli(["uninstall", "--host", "all"], home);
   const created = readdirSync(home, { withFileTypes: true }).map((e) => e.name);
@@ -335,7 +392,7 @@ await test("uninstall on a clean machine creates nothing", () => {
   assert.strictEqual(res.code, 0, res.out);
 });
 
-await test("a UTF-8 BOM does not make the config uninstallable", () => {
+it("a UTF-8 BOM does not make the config uninstallable", () => {
   // Notepad and several Windows tools write a BOM; JSON.parse rejects it and
   // install then failed forever with a message blaming a trailing comma.
   const home = freshHome();
@@ -343,10 +400,13 @@ await test("a UTF-8 BOM does not make the config uninstallable", () => {
   writeFileSync(path.join(home, ".claude", "settings.json"), '\ufeff{"model": "opus"}\n');
   const res = runCli(["install", "--host", "claude-code"], home);
   assert.strictEqual(res.code, 0, res.out);
-  assert.strictEqual(JSON.parse(readFileSync(path.join(home, ".claude", "settings.json"), "utf8")).model, "opus");
+  assert.strictEqual(
+    JSON.parse(readFileSync(path.join(home, ".claude", "settings.json"), "utf8")).model,
+    "opus",
+  );
 });
 
-await test("a host is detected by its own directory, not by our file", () => {
+it("a host is detected by its own directory, not by our file", () => {
   // Detection used to look for the artefact we install, which cannot exist
   // before the first install — so "--host all" refused on a machine that had
   // the host but not our hook.
@@ -358,7 +418,7 @@ await test("a host is detected by its own directory, not by our file", () => {
   assert.ok(!existsSync(path.join(home, ".cursor")), "a cursor directory was invented");
 });
 
-await test("a user's own extension is backed up, never silently replaced or deleted", () => {
+it("a user's own extension is backed up, never silently replaced or deleted", () => {
   const home = freshHome();
   const ext = path.join(home, ".pi", "agent", "extensions", "continue-hook.ts");
   mkdirSync(path.dirname(ext), { recursive: true });
@@ -376,7 +436,7 @@ await test("a user's own extension is backed up, never silently replaced or dele
   assert.ok(backups.length >= 1);
 });
 
-await test("uninstall leaves a user file it did not write", () => {
+it("uninstall leaves a user file it did not write", () => {
   const home = freshHome();
   const ext = path.join(home, ".pi", "agent", "extensions", "continue-hook.ts");
   mkdirSync(path.dirname(ext), { recursive: true });
@@ -386,16 +446,16 @@ await test("uninstall leaves a user file it did not write", () => {
   assert.ok(existsSync(ext), "uninstall deleted a file it did not write");
 });
 
-await test("--dry-run writes nothing at all, not even a backup", () => {
+it("--dry-run writes nothing at all, not even a backup", () => {
   const home = freshHome();
   mkdirSync(path.join(home, ".claude"), { recursive: true });
-  writeFileSync(path.join(home, ".claude", "settings.json"), '{\n  // mine\n}\n');
+  writeFileSync(path.join(home, ".claude", "settings.json"), "{\n  // mine\n}\n");
   const res = runCli(["install", "--host", "claude-code", "--dry-run"], home);
   assert.notStrictEqual(res.code, 0, "a run that would fail should fail in dry-run too");
   assert.deepStrictEqual(readdirSync(path.join(home, ".claude")), ["settings.json"]);
 });
 
-await test("uninstall never truncates a config it cannot parse", () => {
+it("uninstall never truncates a config it cannot parse", () => {
   // It used readJson(..., allowBroken) here, which returned {} and then wrote
   // it — turning a JSONC settings.json into a single "{}".
   const home = freshHome();
@@ -412,11 +472,13 @@ await test("uninstall never truncates a config it cannot parse", () => {
   assert.match(res.out, /not valid JSON/, "the user must be told why it was skipped");
   assert.match(res.out, /skipped/, "the host must not be reported as removed");
   // and the runtime must survive: the hook in that file still points at it
-  assert.ok(existsSync(path.join(home, ".hermes", "continue-hook", "hookctl.py")),
-    "the runtime was deleted while a hook still referenced it");
+  assert.ok(
+    existsSync(path.join(home, ".hermes", "continue-hook", "hookctl.py")),
+    "the runtime was deleted while a hook still referenced it",
+  );
 });
 
-await test("uninstall leaves a user file whose text mentions continue-hook", () => {
+it("uninstall leaves a user file whose text mentions continue-hook", () => {
   // isOurFile() matched the substring "continue-hook", so a hand-written
   // plugin that merely mentions the name in a comment was deleted.
   const home = freshHome();
@@ -430,36 +492,91 @@ await test("uninstall leaves a user file whose text mentions continue-hook", () 
   assert.strictEqual(readFileSync(plugin, "utf8"), mine, "uninstall deleted the user's file");
 });
 
-await test("every installed host fires through the command written into its config", () => {
+it("every installed host fires through the command written into its config", () => {
   // The point of this test: install, then run exactly what the host would run,
   // with that host's real payload shape. Calling the adapter by hand cannot
   // catch a wrong command, a missing transport module, or a renamed field.
   const home = freshHome();
   const transcript = path.join(home, "transcript.jsonl");
-  writeFileSync(transcript,
-    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "要不要我顺便补个测试？" }] } }) + "\n");
+  writeFileSync(
+    transcript,
+    JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "要不要我顺便补个测试？" }] },
+    }) + "\n",
+  );
 
   runCli(["install", "--host", "claude-code,codex,qwen,cursor,copilot,gemini"], home);
 
   const cases = [
-    { host: "claude-code", file: ".claude/settings.json", key: "Stop",
-      payload: { session_id: "c1", stop_hook_active: false, last_assistant_message: "要不要我顺便补个测试？" }, expect: "block" },
-    { host: "codex", file: ".codex/hooks.json", key: "Stop",
-      payload: { session_id: "x1", turn_id: "t1", stop_hook_active: false, last_assistant_message: "要不要我顺便补个测试？" }, expect: "block" },
-    { host: "qwen", file: ".qwen/settings.json", key: "Stop",
-      payload: { session_id: "q1", last_assistant_message: "要不要我顺便补个测试？" }, expect: "block" },
-    { host: "cursor", file: ".cursor/hooks.json", key: "stop",
-      payload: { status: "completed", loop_count: 0, conversation_id: "cu1", transcript_path: transcript }, expect: "followup_message" },
-    { host: "copilot", file: ".copilot/hooks/continue-hook.json", key: "agentStop",
-      payload: { sessionId: "cp1", transcriptPath: transcript, stopReason: "end_turn" }, expect: "block" },
-    { host: "gemini", file: ".gemini/settings.json", key: "AfterAgent",
-      payload: { prompt: "go", prompt_response: "要不要我顺便补个测试？", stop_hook_active: false,
-                 session_id: "g1", hook_event_name: "AfterAgent", timestamp: 1 }, expect: "deny" },
+    {
+      host: "claude-code",
+      file: ".claude/settings.json",
+      key: "Stop",
+      payload: {
+        session_id: "c1",
+        stop_hook_active: false,
+        last_assistant_message: "要不要我顺便补个测试？",
+      },
+      expect: "block",
+    },
+    {
+      host: "codex",
+      file: ".codex/hooks.json",
+      key: "Stop",
+      payload: {
+        session_id: "x1",
+        turn_id: "t1",
+        stop_hook_active: false,
+        last_assistant_message: "要不要我顺便补个测试？",
+      },
+      expect: "block",
+    },
+    {
+      host: "qwen",
+      file: ".qwen/settings.json",
+      key: "Stop",
+      payload: { session_id: "q1", last_assistant_message: "要不要我顺便补个测试？" },
+      expect: "block",
+    },
+    {
+      host: "cursor",
+      file: ".cursor/hooks.json",
+      key: "stop",
+      payload: {
+        status: "completed",
+        loop_count: 0,
+        conversation_id: "cu1",
+        transcript_path: transcript,
+      },
+      expect: "followup_message",
+    },
+    {
+      host: "copilot",
+      file: ".copilot/hooks/continue-hook.json",
+      key: "agentStop",
+      payload: { sessionId: "cp1", transcriptPath: transcript, stopReason: "end_turn" },
+      expect: "block",
+    },
+    {
+      host: "gemini",
+      file: ".gemini/settings.json",
+      key: "AfterAgent",
+      payload: {
+        prompt: "go",
+        prompt_response: "要不要我顺便补个测试？",
+        stop_hook_active: false,
+        session_id: "g1",
+        hook_event_name: "AfterAgent",
+        timestamp: 1,
+      },
+      expect: "deny",
+    },
   ];
 
   for (const c of cases) {
     const group = readJson(path.join(home, c.file)).hooks[c.key][0];
-    const cmd = group.hooks ? group.hooks[0].command : (group.command || group.bash);
+    const cmd = group.hooks ? group.hooks[0].command : group.command || group.bash;
     assert.ok(cmd, `${c.host}: no command was written`);
     const out = execFileSync("sh", ["-c", cmd], {
       input: JSON.stringify(c.payload),
@@ -471,7 +588,7 @@ await test("every installed host fires through the command written into its conf
   }
 });
 
-await test("a skill the user wrote is not deleted by uninstall", () => {
+it("a skill the user wrote is not deleted by uninstall", () => {
   const home = freshHome();
   const skill = path.join(home, ".claude", "skills", "continue-hook", "SKILL.md");
   mkdirSync(path.dirname(skill), { recursive: true });
@@ -484,14 +601,16 @@ await test("a skill the user wrote is not deleted by uninstall", () => {
   assert.strictEqual(readFileSync(skill, "utf8"), mine, "uninstall deleted the user's own skill");
 });
 
-await test("repeated installs do not pile up backups", () => {
+it("repeated installs do not pile up backups", () => {
   const home = freshHome();
   for (let i = 0; i < 3; i++) runCli(["install", "--host", "skills,pi,dsh"], home);
-  const found = execFileSync("sh", ["-c", `find ${JSON.stringify(home)} -name '*.bak*' | wc -l`], { encoding: "utf8" }).trim();
+  const found = execFileSync("sh", ["-c", `find ${JSON.stringify(home)} -name '*.bak*' | wc -l`], {
+    encoding: "utf8",
+  }).trim();
   assert.strictEqual(found, "0", `backups accumulated: ${found}`);
 });
 
-await test("check reports what is installed", () => {
+it("check reports what is installed", () => {
   const home = freshHome();
   runCli(["install", "--host", "claude-code"], home);
   const res = runCli(["check", "--host", "claude-code"], home);
@@ -499,66 +618,58 @@ await test("check reports what is installed", () => {
   assert.ok(res.out.includes("Claude Code"));
 });
 
-await test("dry-run writes nothing", () => {
+it("dry-run writes nothing", () => {
   const home = freshHome();
   const res = runCli(["install", "--host", "claude-code", "--dry-run"], home);
   assert.strictEqual(res.code, 0, res.out);
   assert.ok(!existsSync(path.join(home, ".claude", "settings.json")));
 });
 
-await test("an unknown host is rejected", () => {
+it("an unknown host is rejected", () => {
   const home = freshHome();
   const res = runCli(["install", "--host", "not-a-host"], home);
   assert.strictEqual(res.code, 2);
   assert.ok(res.out.includes("unknown host"));
 });
 
-await test("an installed shell hook actually runs and blocks", () => {
+it("an installed shell hook actually runs and blocks", () => {
   // The missing-transport-module bug: the installed hook imported a module
   // the installer never copied, so it failed open and did nothing — silently.
   const home = freshHome();
   runCli(["install", "--host", "claude-code"], home);
   const hook = path.join(home, ".hermes", "continue-hook", "claude-code", "stop_hook.py");
   assert.ok(existsSync(hook), "the hook must be installed");
-  const out = execFileSync(
-    "python3",
-    [hook],
-    {
-      env: { ...process.env, HOME: home },
-      encoding: "utf8",
-      input: JSON.stringify({
-        session_id: "e2e",
-        stop_hook_active: false,
-        last_assistant_message: "要不要我顺便也把示例补上？",
-      }),
-    },
-  );
+  const out = execFileSync("python3", [hook], {
+    env: { ...process.env, HOME: home },
+    encoding: "utf8",
+    input: JSON.stringify({
+      session_id: "e2e",
+      stop_hook_active: false,
+      last_assistant_message: "要不要我顺便也把示例补上？",
+    }),
+  });
   const decision = JSON.parse(out.trim());
   assert.strictEqual(decision.decision, "block");
   assert.ok(decision.reason.includes("continue-hook"));
 });
 
-await test("an installed shell hook stays silent on a clean reply", () => {
+it("an installed shell hook stays silent on a clean reply", () => {
   const home = freshHome();
   runCli(["install", "--host", "claude-code"], home);
   const hook = path.join(home, ".hermes", "continue-hook", "claude-code", "stop_hook.py");
-  const out = execFileSync(
-    "python3",
-    [hook],
-    {
-      env: { ...process.env, HOME: home },
-      encoding: "utf8",
-      input: JSON.stringify({
-        session_id: "e2e2",
-        stop_hook_active: false,
-        last_assistant_message: "已完成，42 项测试全绿。",
-      }),
-    },
-  );
+  const out = execFileSync("python3", [hook], {
+    env: { ...process.env, HOME: home },
+    encoding: "utf8",
+    input: JSON.stringify({
+      session_id: "e2e2",
+      stop_hook_active: false,
+      last_assistant_message: "已完成，42 项测试全绿。",
+    }),
+  });
   assert.strictEqual(out.trim(), "");
 });
 
-await test("the installed runtime can answer a decision", () => {
+it("the installed runtime can answer a decision", () => {
   const home = freshHome();
   runCli(["install", "--host", "claude-code"], home);
   const out = execFileSync(
@@ -578,5 +689,3 @@ await test("the installed runtime can answer a decision", () => {
   assert.strictEqual(decision.should_nudge, true);
   assert.ok(decision.reason.startsWith("trigger:"));
 });
-
-console.log(`\n${passed} installer test(s) passed`);

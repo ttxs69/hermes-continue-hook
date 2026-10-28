@@ -45,8 +45,12 @@ jobs:
         run: npm ci
       - name: eslint
         run: npx eslint .
-      - name: tsc (Pi extension)
-        run: npx tsc -p tsconfig.pi.json
+      - name: prettier
+        run: npx prettier --check '**/*.{js,mjs,ts,json,yml}'
+      - name: tsc (Pi extension, strict)
+        run: npx tsc -p tsconfig.json
+      - name: tsc (JavaScript, checkJs)
+        run: npx tsc -p tsconfig.checkjs.json
 
   coverage:
     name: pytest + coverage
@@ -60,6 +64,23 @@ jobs:
         run: python -m pip install --upgrade pip pytest pytest-cov
       - name: pytest with the coverage floor
         run: pytest --cov --cov-report=term-missing
+
+  js-coverage:
+    name: vitest + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: npm ci
+      - name: Vitest with the coverage floor
+        run: npx vitest run --coverage
 
   python:
     name: python ${{ matrix.python-version }}
@@ -88,12 +109,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - name: OpenCode plugin tests
-        run: node tests/test_opencode.mjs
-      - name: Installer tests
-        run: node tests/test_installer.mjs
-      - name: Lifecycle invariants
-        run: node tests/test_lifecycle.mjs
+          cache: npm
+      - name: Install test runner
+        run: npm ci
+      - name: Vitest (OpenCode plugin, installer, lifecycle invariants)
+        run: npx vitest run
 
   dsh:
     name: dsh plugin (typecheck + runtime)
@@ -106,13 +126,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install test runner
+        run: npm ci
       - name: Typecheck the dsh plugin against the real dsh packages
         run: bash adapters/dsh/typecheck.sh
       - name: Run the dsh plugin against a mock harness
-        run: node tests/test_dsh.mjs
+        run: npx vitest run tests/test_dsh.test.mjs
 
   package:
     name: npm package contents

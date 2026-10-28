@@ -3,15 +3,15 @@
 ## Before you push
 
 ```bash
-./scripts/check.sh      # ruff, mypy, the Python suite, the Node suites, npm pack
+./scripts/check.sh      # ruff, mypy, pytest, eslint, prettier, tsc ×2, vitest, npm pack
 ```
 
 It is the same set of checks CI runs, minus the DeepSeek Harness typecheck
 (which needs the npm registry):
 
 ```bash
-bash adapters/dsh/typecheck.sh   # compiles the dsh plugin against @deepseek-ai/dsh-*
-node tests/test_dsh.mjs           # runs it against a mock harness
+bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
+npx vitest run tests/test_dsh.test.mjs  # runs it against a mock harness
 ```
 
 ## The rules that matter
@@ -33,9 +33,15 @@ node tests/test_dsh.mjs           # runs it against a mock harness
   sentence that motivated it. A real-world quote beats an invented example.
 - **Version in four places** (`package.json`, `pyproject.toml`, `plugin.yaml`,
   `__init__.py`) — the version-consistency test keeps them in step.
-- Tests use the standard library `unittest` only, no third-party test
-  dependencies, and must pass in BOTH runners — `python tests/test_x.py` and
-  `python -m unittest discover -s tests` — and under an empty `HOME`.
+- **Python tests** use the standard library `unittest` only, no third-party
+  test dependencies, and must pass in BOTH runners — `python tests/test_x.py`
+  and `python -m unittest discover -s tests` — and under an empty `HOME`.
+- **JavaScript tests** are Vitest (`tests/*.test.mjs`). The bodies keep their
+  `assert.*` style through a small shim at the top of each file, so a test
+  written for the old hand-rolled runner moves over by renaming only.
+- **One tool per job.** Lint is eslint, format is prettier, types are `tsc`
+  (`tsconfig.json` for TS, `tsconfig.checkjs.json` for the JS), tests are
+  vitest. Adding a second tool for a job already covered is not an improvement.
 
 ## Adding a host
 

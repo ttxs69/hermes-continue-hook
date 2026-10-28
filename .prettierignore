@@ -1,0 +1,20 @@
+node_modules
+dist
+build
+lib
+coverage
+*.tgz
+package-lock.json
+patch-mode
+adapters/dsh/lib
+.history
+
+# Markdown is hand-authored: Prettier reflows tables and prose in ways that
+# fight the writing. The docs are reviewed by eye, not reformatted.
+*.md
+
+# Tool caches
+.pytest_cache
+.ruff_cache
+.mypy_cache
+__pycache__

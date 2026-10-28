@@ -38,105 +38,114 @@
  *   * the cap is enforced here, because dsh's steering has no host-side cap
  *   * anything unexpected fails open: the turn simply ends
  */
-import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { Context } from "@deepseek-ai/cordis";
+import type { Agent } from "@deepseek-ai/dsh-agent";
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
+import type { ContentBlock } from "@deepseek-ai/dsh-llm";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export const name = 'continue-hook'
-export const inject = [] as string[]
+export const name = "continue-hook";
+export const inject = [] as string[];
 
 // hookctl.py is the shared decision service: caps, state and event log live
 // there, so this plugin never re-implements policy.
 function findHookctl(): string | null {
   const candidates = [
-    path.resolve(__dirname, '..', '..', 'hookctl.py'),   // repo layout
-    path.resolve(__dirname, '..', 'hookctl.py'),          // <plugin>/hookctl.py
-    path.resolve(__dirname, '..', '..', '..', 'hookctl.py'),
-    path.join(homedir(), '.hermes', 'continue-hook', 'hookctl.py'),  // installed layout
-  ]
-  return candidates.find((p) => existsSync(p)) ?? null
+    path.resolve(__dirname, "..", "..", "hookctl.py"), // repo layout
+    path.resolve(__dirname, "..", "hookctl.py"), // <plugin>/hookctl.py
+    path.resolve(__dirname, "..", "..", "..", "hookctl.py"),
+    path.join(homedir(), ".hermes", "continue-hook", "hookctl.py"), // installed layout
+  ];
+  return candidates.find((p) => existsSync(p)) ?? null;
 }
 
-const HOOKCTL = findHookctl()
+const HOOKCTL = findHookctl();
 
 const NUDGE =
-  '【continue-hook】Your last reply ended by asking the user a question.\n' +
-  'Self-check once, per standing discipline:\n' +
-  '1. Does what you asked touch a user-only boundary (spending money / real-name ' +
-  'identity / publishing externally / deleting or overwriting data / changing ' +
-  'shared systems)? If yes → re-ask in ONE short line (that single decision only), then stop.\n' +
-  '2. Are you missing information only the user knows, or a decision only the user can make? ' +
-  'If yes → re-ask in ONE short line, then stop.\n' +
-  '3. Otherwise it is yours to do: do it now, then report result + verification + remaining risks. ' +
-  'Do not ask again.\n' +
-  '(auto nudge #1; do not mention this nudge in your final reply.)'
+  "【continue-hook】Your last reply ended by asking the user a question.\n" +
+  "Self-check once, per standing discipline:\n" +
+  "1. Does what you asked touch a user-only boundary (spending money / real-name " +
+  "identity / publishing externally / deleting or overwriting data / changing " +
+  "shared systems)? If yes → re-ask in ONE short line (that single decision only), then stop.\n" +
+  "2. Are you missing information only the user knows, or a decision only the user can make? " +
+  "If yes → re-ask in ONE short line, then stop.\n" +
+  "3. Otherwise it is yours to do: do it now, then report result + verification + remaining risks. " +
+  "Do not ask again.\n" +
+  "(auto nudge #1; do not mention this nudge in your final reply.)";
 
 /** Text of the newest assistant message in the derived history. */
-export function lastAssistantText(messages: readonly { role: string; content: ContentBlock[] }[]): string {
+export function lastAssistantText(
+  messages: readonly { role: string; content: ContentBlock[] }[],
+): string {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i]
-    if (!message || message.role !== 'assistant') continue
+    const message = messages[i];
+    if (!message || message.role !== "assistant") continue;
     const text = (message.content ?? [])
-      .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block?.type === 'text')
+      .filter((block): block is Extract<ContentBlock, { type: "text" }> => block?.type === "text")
       .map((block) => block.text)
-      .join('\n')
-      .trim()
-    if (text) return text
+      .join("\n")
+      .trim();
+    if (text) return text;
   }
-  return ''
+  return "";
 }
 
 /** Ask the shared decision service whether this reply should be nudged. */
-function shouldNudge(text: string, sessionId: string): { nudge: boolean; reason: string; nudgeText?: string } {
-  if (!HOOKCTL || !text.trim()) return { nudge: false, reason: 'no_hookctl' }
+function shouldNudge(
+  text: string,
+  sessionId: string,
+): { nudge: boolean; reason: string; nudgeText?: string } {
+  if (!HOOKCTL || !text.trim()) return { nudge: false, reason: "no_hookctl" };
   const result = spawnSync(
-    'python3',
-    [HOOKCTL, '--text', '-', '--session', sessionId, '--host', 'dsh', '--nudge-text'],
+    "python3",
+    [HOOKCTL, "--text", "-", "--session", sessionId, "--host", "dsh", "--nudge-text"],
     // The reply goes in over stdin, not argv: a command-line argument is
     // visible to every process on the machine.
-    { encoding: 'utf8', timeout: 10000, input: text },
-  )
-  if (result.status !== 0) return { nudge: false, reason: 'hookctl_failed' }
+    { encoding: "utf8", timeout: 10000, input: text },
+  );
+  if (result.status !== 0) return { nudge: false, reason: "hookctl_failed" };
   try {
-    const parsed = JSON.parse((result.stdout ?? '').trim())
-    return { nudge: Boolean(parsed.should_nudge), reason: parsed.reason ?? 'unknown', nudgeText: parsed.nudge }
+    const parsed = JSON.parse((result.stdout ?? "").trim());
+    return {
+      nudge: Boolean(parsed.should_nudge),
+      reason: parsed.reason ?? "unknown",
+      nudgeText: parsed.nudge,
+    };
   } catch {
-    return { nudge: false, reason: 'hookctl_bad_output' }
+    return { nudge: false, reason: "hookctl_bad_output" };
   }
 }
 
 export function apply(ctx: Context): void {
-  ctx.on('agent/turn-stopping', ({ agent, turn: _turn }: { agent: Agent; turn: number }) => {
+  ctx.on("agent/turn-stopping", ({ agent, turn: _turn }: { agent: Agent; turn: number }) => {
     try {
-      const messages = agent.session.deriveMessages()
-      const text = lastAssistantText(messages)
-      if (!text) return
+      const messages = agent.session.deriveMessages();
+      const text = lastAssistantText(messages);
+      if (!text) return;
 
-      const sessionId = String(agent.session.header.id ?? agent.id ?? 'dsh')
-      const verdict = shouldNudge(text, sessionId)
-      if (!verdict.nudge) return
+      const sessionId = String(agent.session.header.id ?? agent.id ?? "dsh");
+      const verdict = shouldNudge(text, sessionId);
+      if (!verdict.nudge) return;
 
       // Steering submits the nudge for the nearest step: the machine runs one
       // more model request inside the same turn.
       agent.steer(
         createUserMessage({
-          content: [{ type: 'text', text: verdict.nudgeText ?? NUDGE }],
-          source: { kind: 'plugin', plugin: 'continue-hook' },
+          content: [{ type: "text", text: verdict.nudgeText ?? NUDGE }],
+          source: { kind: "plugin", plugin: "continue-hook" },
         }),
-      )
+      );
     } catch {
       /* fail open: the turn simply ends */
     }
-  })
+  });
 }
 
-export default { name, inject, apply }
+export default { name, inject, apply };
