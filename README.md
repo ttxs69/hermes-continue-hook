@@ -251,6 +251,7 @@ of date.
 * [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — every knob and its default
 * [docs/DESIGN.md](docs/DESIGN.md) — the twelve routes evaluated for the
   Hermes plugin, and why each was rejected
+* [docs/PUBLISHING.md](docs/PUBLISHING.md) — how a release reaches npm
 
 ## Tests
 
