@@ -40,7 +40,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          # One source of truth: .nvmrc. A literal here is a second pin that
+          # can drift from the one the local gate checks.
+          node-version-file: ".nvmrc"
       - name: Install lint tooling
         run: npm install --no-package-lock --no-audit --no-fund
       # eslint includes the complexity rule (ceiling 10) for the shipped JS/TS.
@@ -106,7 +108,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          # One source of truth: .nvmrc. A literal here is a second pin that
+          # can drift from the one the local gate checks.
+          node-version-file: ".nvmrc"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -168,7 +172,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          # One source of truth: .nvmrc. A literal here is a second pin that
+          # can drift from the one the local gate checks.
+          node-version-file: ".nvmrc"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -186,7 +192,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          # One source of truth: .nvmrc. A literal here is a second pin that
+          # can drift from the one the local gate checks.
+          node-version-file: ".nvmrc"
       - name: Pack the tarball
         run: npm pack --dry-run
       - name: Check the tarball carries the runtime

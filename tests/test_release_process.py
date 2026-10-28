@@ -11,6 +11,7 @@ import os
 import re
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 REPO = Path(__file__).resolve().parent.parent
 PUBLISH = REPO / ".github" / "workflows" / "publish.yml"
@@ -165,6 +166,94 @@ class TestThePublishWorkflow(unittest.TestCase):
         """
         self.assertNotIn("npm install -g npm@latest", self.text)
         self.assertIn("npm --version", self.text)
+
+
+class TestTheWorkflowsReadTheNodeVersionFromOneFile(unittest.TestCase):
+    """`.nvmrc` must be the only pin, in the repository and in CI alike.
+
+    This is the failure that cost five release attempts: the local pin and
+    the CI pin were two separate literals, so "it works here" said nothing
+    about "it works there". A literal `node-version:` in a workflow is a
+    second pin, and a second pin drifts.
+
+    Exceptions are deliberate and named here: the `node` job runs a matrix
+    of older versions on purpose (a library must work on more than the
+    version its maintainer uses), and the `node18-cli` job proves the
+    shipped CLI still runs on node 18. Both are *tests of other versions*,
+    not the project's own toolchain.
+    """
+
+    #: Jobs allowed to name a node version literally, and why.
+    ALLOWED_LITERAL_JOBS: ClassVar[dict[str, str]] = {
+        "node18-cli": "proves the shipped CLI still runs on node 18",
+        "node": "the compatibility matrix, by design",
+    }
+
+    def _jobs(self, text: str) -> dict[str, list[str]]:
+        """Group a workflow's lines by job, using indentation only."""
+        jobs: dict[str, list[str]] = {}
+        current = None
+        for line in text.splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if line.startswith("  ") and not line.startswith("    "):
+                stripped = line.strip()
+                if stripped.endswith(":") and ":" not in stripped[:-1]:
+                    current = stripped[:-1]
+                    jobs[current] = []
+                    continue
+            if current is not None:
+                jobs[current].append(line)
+        return jobs
+
+    def test_no_workflow_pins_a_node_version_of_its_own(self) -> None:
+        offenders = []
+        for workflow in sorted((REPO / ".github" / "workflows").glob("*.yml")):
+            for job, lines in self._jobs(workflow.read_text(encoding="utf-8")).items():
+                if job in self.ALLOWED_LITERAL_JOBS:
+                    continue
+                for line in lines:
+                    stripped = line.strip()
+                    if not stripped.startswith("node-version:"):
+                        continue
+                    value = stripped.split(":", 1)[1].strip()
+                    # A matrix reference is not a pin — it names the matrix.
+                    if value.startswith("${{"):
+                        continue
+                    offenders.append(f"{workflow.name}: job '{job}' pins {value}")
+        self.assertEqual(
+            offenders,
+            [],
+            "these workflows carry their own node pin instead of reading "
+            ".nvmrc:\n  " + "\n  ".join(offenders),
+        )
+
+    def test_every_workflow_that_installs_node_reads_the_file(self) -> None:
+        for workflow in sorted((REPO / ".github" / "workflows").glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            for job, lines in self._jobs(text).items():
+                if job in self.ALLOWED_LITERAL_JOBS:
+                    continue
+                body = "\n".join(lines)
+                if "actions/setup-node" not in body:
+                    continue
+                self.assertIn(
+                    'node-version-file: ".nvmrc"',
+                    body,
+                    f"{workflow.name}: job '{job}' sets up node without .nvmrc",
+                )
+
+    def test_the_file_holds_a_major_version_only(self) -> None:
+        """`.nvmrc` names a major, so CI tracks the latest patch of it.
+
+        The floating `node-version: "24"` was itself a bug — different jobs
+        landed on 24.21 and 24.22 and disagreed — but pinning an exact patch
+        in one file would make every security release a manual bump. A major
+        is the right granularity: one node line, newest security patch.
+        """
+        value = (REPO / ".nvmrc").read_text(encoding="utf-8").strip()
+        self.assertTrue(value.isdigit(), f".nvmrc should hold a major, got {value!r}")
+        self.assertGreaterEqual(int(value), 18)
 
 
 class TestGitHooks(unittest.TestCase):
