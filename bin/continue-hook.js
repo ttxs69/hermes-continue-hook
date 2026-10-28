@@ -4,7 +4,7 @@
  *
  * Why a CLI instead of a shell script: the shell script could not run on
  * Windows, and the npm package needs an entry point. This CLI is what
- * `npx hermes-continue-hook install` runs.
+ * `npx @ttxs69/hermes-continue-hook install` runs.
  *
  * Commands:
  *   install    [--host <list|all>] [--dry-run]

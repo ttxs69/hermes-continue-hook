@@ -70,7 +70,7 @@ fi
 if ! git apply --check "$PATCH" 2>/dev/null; then
   echo "✗ this patch was generated for core ${PIN} and does not apply to ${HEAD_SHORT}." >&2
   echo "  Use the plugin mode instead — it needs no core changes:" >&2
-  echo "    npx hermes-continue-hook install --host claude-code" >&2
+  echo "    npx @ttxs69/hermes-continue-hook install --host claude-code" >&2
   echo "  (patch mode is pinned on purpose: it rewrites core files and cannot" >&2
   echo "   follow a moving target safely.)" >&2
   exit 3

@@ -46,7 +46,7 @@ if ! gh secret list | grep -q '^NPM_TOKEN'; then
   echo "  Then re-run this script. For later releases, configure trusted"
   echo "  publishing once and drop the secret (needs npm >= 11.15.0):"
   echo
-  echo "    npm trust github hermes-continue-hook \\"
+  echo "    npm trust github @ttxs69/hermes-continue-hook \\"
   echo "      --repo ttxs69/hermes-continue-hook --file publish.yml --env npm \\"
   echo "      --allow-publish --registry=https://registry.npmjs.org/"
   echo

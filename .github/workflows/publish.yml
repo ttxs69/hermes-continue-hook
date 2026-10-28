@@ -110,7 +110,7 @@ jobs:
         run: npm install -g npm@latest
       - name: Check what is already published
         run: |
-          npm view hermes-continue-hook versions --json || echo "not published yet"
+          npm view @ttxs69/hermes-continue-hook versions --json || echo "not published yet"
       - name: Pack and show the contents
         run: npm pack --dry-run
       - name: Dry run

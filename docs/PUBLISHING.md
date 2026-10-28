@@ -97,7 +97,7 @@ The workflow's version gate refuses a tag that does not match the version in
 ### 4. Set up the trusted publisher (once)
 
 Now that the package exists on the registry, npm will accept an OIDC publish
-from this workflow. Either on npmjs.com — Packages → *hermes-continue-hook* →
+from this workflow. Either on npmjs.com — Packages → *@ttxs69/hermes-continue-hook* →
 Settings → **Trusted Publisher** → GitHub Actions — with:
 
 | Field | Value |
@@ -111,7 +111,7 @@ Settings → **Trusted Publisher** → GitHub Actions — with:
 or from the CLI (npm 11.15.0+, 2FA enabled on the account):
 
 ```bash
-npm trust github hermes-continue-hook \
+npm trust github @ttxs69/hermes-continue-hook \
   --file publish.yml \
   --repo ttxs69/hermes-continue-hook \
   --env npm \
@@ -204,9 +204,9 @@ runtime and contains no build artefacts.
 ## Verifying and troubleshooting
 
 ```bash
-npm view hermes-continue-hook dist.attestations   # provenance attached?
+npm view @ttxs69/hermes-continue-hook dist.attestations   # provenance attached?
 npm audit signatures                               # does it verify?
-npm view hermes-continue-hook versions --json      # what is on the registry
+npm view @ttxs69/hermes-continue-hook versions --json      # what is on the registry
 ```
 
 | Symptom | Cause |

@@ -1,5 +1,5 @@
 {
-  "name": "hermes-continue-hook",
+  "name": "@ttxs69/hermes-continue-hook",
   "version": "1.3.0",
   "description": "Stop the agent from asking permission for things it should just do — Claude Code, Codex, Qwen Code, Cursor, Copilot CLI, Gemini CLI, OpenCode, Pi, DeepSeek Harness, Hermes Agent.",
   "keywords": [

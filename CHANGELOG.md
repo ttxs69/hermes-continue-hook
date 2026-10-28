@@ -17,9 +17,9 @@
 - New `max_nudges_per_session` (default 20) — the backstop for hosts with no
   host-side cap (DeepSeek Harness, Cursor).
 - **Cross-platform installer.** `bin/continue-hook.js` replaces the bash
-  script: `npx hermes-continue-hook install --host all`. Idempotent,
+  script: `npx @ttxs69/hermes-continue-hook install --host all`. Idempotent,
   non-destructive, `--dry-run` and `check` included.
-- **npm package** (`hermes-continue-hook`) with the CLI as its entry point.
+- **npm package** (`@ttxs69/hermes-continue-hook`) with the CLI as its entry point.
 - Quality gates: `ruff` (clean), `mypy` (clean), a version-consistency test
   (the version lived in four places and drifted), and a hygiene test that
   fails the build on local paths or credential-shaped strings.

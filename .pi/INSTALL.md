@@ -5,7 +5,7 @@ exactly one copy of it in this repository, and the installer copies it where
 Pi looks for extensions.
 
 ```bash
-npx hermes-continue-hook install --host pi
+npx @ttxs69/hermes-continue-hook install --host pi
 # → ~/.pi/agent/extensions/continue-hook.ts
 ```
 

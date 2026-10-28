@@ -18,7 +18,7 @@ looks like it is asking permission*; the agent keeps the final word on whether
 the question was legitimate.
 
 [![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/hermes-continue-hook)](https://www.npmjs.com/package/hermes-continue-hook)
+[![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
 [![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Why
@@ -91,10 +91,10 @@ see [Modes](#modes) below.
 
 ```bash
 # every host on this machine
-npx hermes-continue-hook install --host all
+npx @ttxs69/hermes-continue-hook install --host all
 
 # one host
-npx hermes-continue-hook install --host claude-code
+npx @ttxs69/hermes-continue-hook install --host claude-code
 ```
 
 For Hermes Agent itself:
@@ -123,7 +123,7 @@ to defaults (it can never crash the gateway).
 ## Quick start (30 seconds)
 
 ```bash
-npx hermes-continue-hook install --host all
+npx @ttxs69/hermes-continue-hook install --host all
 # then ask an agent for something trivial:
 #   "帮我把 README 的安装步骤改短一点"
 # and watch whether it asks permission for things it could just do.
@@ -207,8 +207,8 @@ comparable across all of them.
 ### Install
 
 ```bash
-npx hermes-continue-hook install --host all      # every host on this machine
-npx hermes-continue-hook install --host claude-code
+npx @ttxs69/hermes-continue-hook install --host all      # every host on this machine
+npx @ttxs69/hermes-continue-hook install --host claude-code
 npx hermes-continue-hook check                    # what is installed
 npx hermes-continue-hook uninstall --host all     # remove (keeps your other hooks)
 ```

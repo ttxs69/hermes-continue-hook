@@ -7,7 +7,7 @@ where OpenCode looks for it.
 **User-wide (recommended)**
 
 ```bash
-npx hermes-continue-hook install --host opencode
+npx @ttxs69/hermes-continue-hook install --host opencode
 # → ~/.config/opencode/plugin/continue-hook.js
 ```
 

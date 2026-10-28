@@ -17,7 +17,7 @@
 set -euo pipefail
 
 REGISTRY="https://registry.npmjs.org/"
-PKG="hermes-continue-hook"
+PKG="@ttxs69/hermes-continue-hook"
 REPO="ttxs69/hermes-continue-hook"
 WORKFLOW="publish.yml"
 ENVIRONMENT="npm"
