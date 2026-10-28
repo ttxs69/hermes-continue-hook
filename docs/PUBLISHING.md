@@ -17,7 +17,8 @@ npm changed its authentication rules twice in 2026. Both matter here.
 | **Staged publishing** (`npm stage publish` → approve with 2FA) puts a human in the loop. | Works for a *new* package too: npm publishes a `0.0.0-stage` placeholder so the package exists, then the approved version goes live. |
 | **Bypass-2FA tokens lose direct publish in January 2027.** | Move automation to OIDC or to staged publishing. A token with direct-publish access is on its way out. |
 | **A trusted publisher must publish once within 2 days** of being created, or it expires. | Create it when you are ready to release, not weeks in advance. |
-| **Up to 10 trusted publishers per package**, and the fields of an existing one cannot be edited — only revoked and recreated. | Useful when a project publishes from several workflows or providers. |
+| **Up to 10 trusted publishers per package**, and an existing one's fields cannot be edited — only revoked and recreated. | Useful when a project publishes from several workflows or providers. |
+| **A bypass-2FA token loses direct publish in January 2027** — the same change that deprecates the token type. | Which is why the token is for one publish only, and the trusted publisher takes over immediately after. |
 
 Sources: [trusted publishing](https://docs.npmjs.com/trusted-publishers),
 [staged publishing](https://docs.npmjs.com/staged-publishing),
@@ -54,8 +55,26 @@ Only the account owner can do this — it is an identity action.
 |---|---|---|
 | Packages and scopes → Permissions | **Read and write (publish and stage)** | a stage-only token is rejected with `E_STAGE_REQUIRED` |
 | Select Packages | **All Packages** | the package does not exist yet, so it cannot be picked by name |
-| Bypass two-factor authentication | **on** | a non-interactive publish needs it |
+| Bypass two-factor authentication | **on** | **required** — see below |
 | Expiration | as short as possible | revoke it right after the first release |
+
+**"Bypass 2FA" is not optional here.** Measured against the registry: a token
+with `bypass_2fa: false` is refused on a direct publish with
+
+```
+401  {"error":"You must provide a one-time pass. ..."}
+```
+
+The account has 2FA on and CI has nobody to answer the prompt. Check a token
+before relying on it:
+
+```bash
+curl -sS -H "Authorization: Bearer $NPM_TOKEN" \\
+  https://registry.npmjs.org/-/npm/v1/tokens | grep bypass_2fa
+```
+
+The same token *can* stage — staging deliberately does not need 2FA — so a
+token without bypass has a way through, but a human has to approve it.
 
 ### 2. Store it in the repository
 
