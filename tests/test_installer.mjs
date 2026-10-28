@@ -108,6 +108,47 @@ await test("uninstall removes only our hook", () => {
   assert.strictEqual(settings.model, "opus");
 });
 
+await test("install never deletes the user's own flat hooks", () => {
+  // Cursor entries are {command}, Copilot entries are {type, bash} — neither
+  // has a "hooks" array. A cleaner that assumed a "hooks" array dropped them,
+  // which deleted the user's own hooks on install.
+  const home = freshHome();
+  mkdirSync(path.join(home, ".cursor"), { recursive: true });
+  mkdirSync(path.join(home, ".copilot", "hooks"), { recursive: true });
+  writeFileSync(
+    path.join(home, ".cursor", "hooks.json"),
+    JSON.stringify({
+      version: 1,
+      hooks: { stop: [{ command: "my-own-cursor-hook.sh" }, { command: "another.sh" }] },
+    }),
+  );
+  writeFileSync(
+    path.join(home, ".copilot", "hooks", "continue-hook.json"),
+    JSON.stringify({
+      version: 1,
+      hooks: { agentStop: [{ type: "command", bash: "my-own-copilot.sh", timeoutSec: 5 }] },
+    }),
+  );
+  runCli(["install", "--host", "cursor,copilot"], home);
+
+  const cursor = readJson(path.join(home, ".cursor", "hooks.json"));
+  const cursorBlob = JSON.stringify(cursor);
+  assert.ok(cursorBlob.includes("my-own-cursor-hook.sh"), "cursor hook was deleted");
+  assert.ok(cursorBlob.includes("another.sh"), "second cursor hook was deleted");
+  assert.ok(cursorBlob.includes("continue-hook"), "our hook must be added");
+
+  const copilot = readJson(path.join(home, ".copilot", "hooks", "continue-hook.json"));
+  const copilotBlob = JSON.stringify(copilot);
+  assert.ok(copilotBlob.includes("my-own-copilot.sh"), "copilot hook was deleted");
+  assert.ok(copilotBlob.includes("continue-hook"), "our hook must be added");
+
+  // and uninstall must remove only ours
+  runCli(["uninstall", "--host", "cursor,copilot"], home);
+  const after = JSON.stringify(readJson(path.join(home, ".cursor", "hooks.json")));
+  assert.ok(!after.includes("continue-hook"), "our hook must be gone");
+  assert.ok(after.includes("my-own-cursor-hook.sh"), "the user's hook must survive");
+});
+
 await test("every JSON host gets its own config file", () => {
   const home = freshHome();
   const res = runCli(["install", "--host", "all"], home);

@@ -180,8 +180,16 @@ function patchHooks(data, kind, hookCmd) {
 
   const kept = [];
   for (const group of list) {
-    const entries = Array.isArray(group?.hooks) ? group.hooks.filter((h) => !isOurs(h)) : [];
-    if (entries.length) kept.push({ ...group, hooks: entries });
+    if (isOurs(group)) continue;
+    if (Array.isArray(group?.hooks)) {
+      // Claude-Code-shaped entry: a group of hooks.
+      const entries = group.hooks.filter((h) => !isOurs(h));
+      if (entries.length) kept.push({ ...group, hooks: entries });
+    } else {
+      // Flat entry (Cursor: {command}, Copilot: {type, bash}) — the user's
+      // own hook. Dropping these would delete somebody else's configuration.
+      kept.push(group);
+    }
   }
 
   if (kind === "cursor-stop") {
@@ -204,9 +212,13 @@ function removeOurs(data, kind) {
   const list = Array.isArray(data.hooks[key]) ? data.hooks[key] : [];
   const kept = [];
   for (const group of list) {
-    const entries = Array.isArray(group?.hooks) ? group.hooks.filter((h) => !isOurs(h)) : [];
-    if (entries.length) kept.push({ ...group, hooks: entries });
-    else if (!isOurs(group)) kept.push(group);
+    if (isOurs(group)) continue;
+    if (Array.isArray(group?.hooks)) {
+      const entries = group.hooks.filter((h) => !isOurs(h));
+      if (entries.length) kept.push({ ...group, hooks: entries });
+    } else {
+      kept.push(group);
+    }
   }
   if (kept.length) data.hooks[key] = kept;
   else delete data.hooks[key];
