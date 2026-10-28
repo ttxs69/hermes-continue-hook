@@ -14,3 +14,8 @@ htmlcov/
 coverage/
 .pytest_cache/
 .installed.json
+
+# Published as a library: exact devDependency pins instead of a lockfile.
+# A lock written by npm 12 makes `npm ci` fail on npm 10 with
+# "Exit handler never called", and the shipped package has no runtime deps.
+package-lock.json

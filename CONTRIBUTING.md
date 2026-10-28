@@ -1,5 +1,15 @@
 # Contributing
 
+## Setting up
+
+Node **22.12+** for the JavaScript toolchain (vitest 5, eslint 10, typescript 6).
+The published package itself still runs on Node 18 — CI proves that separately
+with a job that installs and uninstalls using nothing but `node`.
+
+```bash
+npm install     # dev tooling only; the shipped package has no runtime deps
+```
+
 ## Before you push
 
 ```bash

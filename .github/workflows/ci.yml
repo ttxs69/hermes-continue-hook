@@ -40,9 +40,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
       - name: Install lint tooling
-        run: npm ci
+        run: npm install --no-package-lock --no-audit --no-fund
       - name: eslint
         run: npx eslint .
       - name: prettier
@@ -65,6 +64,27 @@ jobs:
       - name: pytest with the coverage floor
         run: pytest --cov --cov-report=term-missing
 
+  node18-cli:
+    name: node 18 — the shipped CLI still runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      # No dev dependencies on this one: engines says >=18, so a plain `node`
+      # must be enough to load and run the installer.
+      - name: --help parses
+        run: node bin/continue-hook.js --help
+      - name: check reports a clean machine
+        run: node bin/continue-hook.js check --json
+      - name: install then uninstall in a throwaway HOME
+        run: |
+          export HOME=$(mktemp -d)
+          node bin/continue-hook.js install --host claude-code
+          node bin/continue-hook.js uninstall --host all
+          test ! -e "$HOME/.hermes/continue-hook"
+
   js-coverage:
     name: vitest + coverage
     runs-on: ubuntu-latest
@@ -77,8 +97,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install
-        run: npm ci
+      - name: Install dev tooling
+        run: npm install --no-package-lock --no-audit --no-fund
       - name: Vitest with the coverage floor
         run: npx vitest run --coverage
 
@@ -103,15 +123,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ["18", "20", "22"]
+        # vitest 5 needs ^22.12 || ^24 || >=26. The shipped CLI still supports
+        # 18 (see the node18-cli job below); the dev toolchain does not.
+        node-version: ["22", "24"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - name: Install test runner
-        run: npm ci
+      - name: Install dev tooling
+        run: npm install --no-package-lock --no-audit --no-fund
       - name: Vitest (OpenCode plugin, installer, lifecycle invariants)
         run: npx vitest run
 
