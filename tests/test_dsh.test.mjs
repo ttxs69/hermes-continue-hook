@@ -164,6 +164,12 @@ console.log("compiling the plugin …");
 const TSC_JS = path.join(WORK, "node_modules", "typescript", "bin", "tsc");
 if (!existsSync(TSC_JS)) {
   console.error("continue-hook dsh test: typescript is not installed at", TSC_JS);
+  console.error("  npm root:", execFileSync("npm", ["root"], { encoding: "utf8" }).trim());
+  console.error("  npm prefix:", execFileSync("npm", ["prefix"], { encoding: "utf8" }).trim());
+  console.error(
+    "  npm config prefix:",
+    execFileSync("npm", ["config", "get", "prefix"], { encoding: "utf8" }).trim(),
+  );
   console.error("  node_modules present:", existsSync(path.join(WORK, "node_modules")));
   if (existsSync(path.join(WORK, "node_modules"))) {
     console.error(
