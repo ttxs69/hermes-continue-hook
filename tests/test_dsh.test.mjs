@@ -38,6 +38,11 @@ execFileSync(
     "--no-save",
     "--no-audit",
     "--no-fund",
+    // The official registry, explicitly. A user (or CI) whose ~/.npmrc points
+    // at a regional mirror gets a 404 for these packages — the mirror does not
+    // carry them — and the test fails for a reason that has nothing to do with
+    // this plugin.
+    "--registry=https://registry.npmjs.org/",
     "@deepseek-ai/dsh-agent",
     "@deepseek-ai/dsh-llm",
     "@deepseek-ai/dsh-session",
