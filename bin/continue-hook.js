@@ -17,7 +17,7 @@
  *   * non-destructive — your other hooks and settings keys survive,
  *   * reversible — uninstall removes only what this tool installed.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, cpSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -265,8 +265,6 @@ const skillTargetDirs = () => {
   const present = [...new Set([...always, ...presentHostDirs])];
   return present;
 };
-
-const configPath = (def) => expand(def.config ?? def.target ?? ".");
 
 /** Host directories this tool has actually written a hook into. */
 const installedHosts = () => {

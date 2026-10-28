@@ -113,7 +113,7 @@ export async function handleIdle(client, event) {
   // cap is what prevents a double nudge. Keeping a private 1.5 s window here
   // meant a skipped evaluation left no trace, so the event log could not be
   // used as the denominator.
-  let messages = [];
+  let messages;
   try {
     messages = await client.session.messages({ path: { id: sessionId } });
   } catch {

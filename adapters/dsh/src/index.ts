@@ -39,7 +39,7 @@
  *   * anything unexpected fails open: the turn simply ends
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -115,7 +115,7 @@ function shouldNudge(text: string, sessionId: string): { nudge: boolean; reason:
 }
 
 export function apply(ctx: Context): void {
-  ctx.on('agent/turn-stopping', ({ agent, turn }: { agent: Agent; turn: number }) => {
+  ctx.on('agent/turn-stopping', ({ agent, turn: _turn }: { agent: Agent; turn: number }) => {
     try {
       const messages = agent.session.deriveMessages()
       const text = lastAssistantText(messages)

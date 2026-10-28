@@ -25,10 +25,41 @@ jobs:
           python-version: "3.12"
       - name: Install tools
         run: python -m pip install --upgrade pip ruff mypy
-      - name: ruff
+      - name: ruff check
         run: ruff check .
+      - name: ruff format --check
+        run: ruff format --check .
       - name: mypy
         run: mypy
+
+  ts:
+    name: eslint & tsc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install lint tooling
+        run: npm ci
+      - name: eslint
+        run: npx eslint .
+      - name: tsc (Pi extension)
+        run: npx tsc -p tsconfig.pi.json
+
+  coverage:
+    name: pytest + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install --upgrade pip pytest pytest-cov
+      - name: pytest with the coverage floor
+        run: pytest --cov --cov-report=term-missing
 
   python:
     name: python ${{ matrix.python-version }}

@@ -36,6 +36,7 @@ The old implementation never reset the counter, which made
 ``max_nudges_per_turn: 2`` mean "two nudges per session, ever". That is
 fixed here and covered by tests.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -267,7 +268,8 @@ def _prune_sessions(state: dict[str, Any], now: float | None = None) -> None:
     for name in [
         name
         for name, entry in sessions.items()
-        if not isinstance(entry, dict) or _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cutoff
+        if not isinstance(entry, dict)
+        or _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cutoff
     ]:
         sessions.pop(name, None)
 
@@ -360,7 +362,11 @@ def decide(
 
     cfg = load_config(config_path)
     # The config may redirect the log (a private directory, a read-only home).
-    if events_path is None and isinstance(cfg.get("events_path"), str) and cfg["events_path"].strip():
+    if (
+        events_path is None
+        and isinstance(cfg.get("events_path"), str)
+        and cfg["events_path"].strip()
+    ):
         events_path = Path(str(cfg["events_path"])).expanduser()
     # The whole read-modify-write happens under the lock: two hooks firing at
     # once must not overwrite each other's counters.
@@ -378,9 +384,17 @@ def decide(
         )
 
 
-def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any],
-                   state_path: Path, events_path: Path | str | None,
-                   continued: bool, platform: str) -> Decision:
+def _decide_locked(
+    text: str,
+    *,
+    session_id: str,
+    host: str,
+    cfg: dict[str, Any],
+    state_path: Path,
+    events_path: Path | str | None,
+    continued: bool,
+    platform: str,
+) -> Decision:
     """The decision itself. Callers hold the state lock."""
     state = read_state(state_path)
     now = time.time()
@@ -419,7 +433,8 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
                 "session": session_id,
                 "host": host,
                 "platform": platform,
-                "decision": ("nudge" if nudge else "skip") + ("_dryrun" if cfg.get("dry_run") else ""),
+                "decision": ("nudge" if nudge else "skip")
+                + ("_dryrun" if cfg.get("dry_run") else ""),
                 "reason": reason,
                 "attempt": attempt,
                 "snippet": snippet,
@@ -454,7 +469,11 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
     if total >= max_per_session:
         return finish(False, "max_nudges_per_session")
     cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
-    if cooldown > 0 and total > 0 and now - _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cooldown:
+    if (
+        cooldown > 0
+        and total > 0
+        and now - _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cooldown
+    ):
         return finish(False, "cooldown")
 
     if cfg.get("dry_run"):
@@ -472,19 +491,24 @@ def _cli(argv: Iterable[str]) -> int:
     break the host that asked.
     """
     parser = argparse.ArgumentParser(description="continue-hook decision service")
-    parser.add_argument("--text", default="",
-                        help="the reply text; use '-' to read it from stdin "
-                             "(keeps the conversation out of the process list)")
+    parser.add_argument(
+        "--text",
+        default="",
+        help="the reply text; use '-' to read it from stdin "
+        "(keeps the conversation out of the process list)",
+    )
     parser.add_argument("--session", default="default")
     parser.add_argument("--host", default="unknown")
     parser.add_argument("--platform", default="")
     parser.add_argument("--config", default=None)
     parser.add_argument("--state", default=None)
     parser.add_argument("--events", default=None)
-    parser.add_argument("--continued", action="store_true",
-                        help="the host already continued this turn")
-    parser.add_argument("--nudge-text", action="store_true",
-                        help="also print the nudge text to inject")
+    parser.add_argument(
+        "--continued", action="store_true", help="the host already continued this turn"
+    )
+    parser.add_argument(
+        "--nudge-text", action="store_true", help="also print the nudge text to inject"
+    )
     args = parser.parse_args(list(argv))
 
     text = args.text
@@ -512,6 +536,7 @@ def _cli(argv: Iterable[str]) -> int:
         if args.nudge_text and decision.should_nudge:
             try:
                 from detector import build_nudge  # type: ignore[no-redef]
+
                 payload["nudge"] = build_nudge(decision.attempt)
             except Exception:
                 pass

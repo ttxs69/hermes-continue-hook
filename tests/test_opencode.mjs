@@ -130,7 +130,7 @@ await test("a repeated idle is recorded by the engine, not silently debounced", 
     path.join(HOME, ".hermes", "continue_hook.json"),
     JSON.stringify({ max_nudges_per_turn: 1 }),
   );
-  const { client, calls } = mockClient([assistant(ASK)]);
+  const { client } = mockClient([assistant(ASK)]);
   const first = await handleIdle(client, { properties: { sessionID: "s5" } });
   const second = await handleIdle(client, { properties: { sessionID: "s5" } });
   assert.strictEqual(first.nudged, true);

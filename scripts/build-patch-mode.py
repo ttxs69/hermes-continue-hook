@@ -23,6 +23,7 @@ Run it after changing the engine:
 
 ``tests/test_patch_mode.py`` fails when the generated file is out of date.
 """
+
 from __future__ import annotations
 
 import re
@@ -146,7 +147,7 @@ def _strip_module_preamble(source: str) -> str:
     text = source.replace("from __future__ import annotations\n", "", 1)
     match = re.match(r'\s*"""(?:.|\n)*?"""\n', text)
     if match:
-        text = text[match.end():]
+        text = text[match.end() :]
     return text
 
 
@@ -204,8 +205,10 @@ def _replace_decision_class(source: str) -> str:
         re.S,
     )
     if not pattern.search(source):
-        raise SystemExit("build-patch-mode: the Decision class changed — "
-                         "update _replace_decision_class in this script")
+        raise SystemExit(
+            "build-patch-mode: the Decision class changed — "
+            "update _replace_decision_class in this script"
+        )
     return pattern.sub("__DECISION__\n\ndef ", source, count=1).replace(
         "__DECISION__", PLAIN_DECISION.rstrip("\n")
     )
@@ -259,8 +262,10 @@ def main() -> int:
     if "--check" in sys.argv:
         current = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
         if current != generated:
-            print("✗ patch-mode/continue_hook.py is out of date — "
-                  "run: python3 scripts/build-patch-mode.py")
+            print(
+                "✗ patch-mode/continue_hook.py is out of date — "
+                "run: python3 scripts/build-patch-mode.py"
+            )
             return 1
         print("✓ patch-mode/continue_hook.py is up to date")
         return 0

@@ -20,6 +20,7 @@ Design rules:
     the user's agent session.
   * Never nudge when the host says it already continued this turn.
 """
+
 from __future__ import annotations
 
 import json
@@ -106,7 +107,11 @@ def _record_to_text(record: Any) -> str:
     if role not in ("assistant", "agent", None):
         return ""
     body = record.get("message", record)
-    text = _text_from_content(body.get("content")) if isinstance(body, dict) else _text_from_content(body)
+    text = (
+        _text_from_content(body.get("content"))
+        if isinstance(body, dict)
+        else _text_from_content(body)
+    )
     if not text:
         text = _text_from_content(record.get("content"))
     return text
@@ -183,8 +188,14 @@ def read_first_transcript(payload: dict[str, Any], *fields: str) -> str:
 
 def session_key(payload: dict[str, Any], fallback: str) -> str:
     """Pull a stable per-conversation key out of a host payload."""
-    for field in ("session_id", "sessionId", "conversation_id", "conversationId",
-                  "thread_id", "threadId"):
+    for field in (
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "conversationId",
+        "thread_id",
+        "threadId",
+    ):
         value = payload.get(field)
         if value:
             return str(value)[:64]
@@ -221,9 +232,14 @@ def host_loop_exceeded(payload: dict[str, Any], max_host_loops: int) -> bool:
     return host_loop_count(payload) >= max_host_loops
 
 
-def decide(text: str, *, session_id: str, host: str,
-           payload: dict[str, Any] | None = None,
-           platform: str = "") -> hookctl.Decision:
+def decide(
+    text: str,
+    *,
+    session_id: str,
+    host: str,
+    payload: dict[str, Any] | None = None,
+    platform: str = "",
+) -> hookctl.Decision:
     """Ask the shared decision service whether this reply should be nudged."""
     return hookctl.decide(
         text,

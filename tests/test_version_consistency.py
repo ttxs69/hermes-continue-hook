@@ -5,6 +5,7 @@ package, and each of those carries its own version field. They drifted before
 (the plugin said 1.0.0 while the package said 1.3.0), so the check is a test
 rather than a convention.
 """
+
 from __future__ import annotations
 
 import json

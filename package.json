@@ -38,10 +38,11 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "python3 -m unittest discover -s tests && node tests/test_opencode.mjs && node tests/test_installer.mjs",
+    "test": "python3 -m unittest discover -s tests && node tests/test_opencode.mjs && node tests/test_installer.mjs && node tests/test_lifecycle.mjs",
     "test:dsh": "node tests/test_dsh.mjs",
-    "lint": "ruff check . && ruff format --check .",
-    "typecheck": "mypy detector.py hookctl.py __init__.py adapters/_common.py",
+    "test:coverage": "python3 -m pytest --cov --cov-report=term-missing",
+    "lint": "ruff check . && ruff format --check . && npx eslint .",
+    "typecheck": "mypy && npx tsc -p tsconfig.pi.json",
     "check": "./scripts/check.sh",
     "prepack": "node scripts/clean-pack.mjs"
   },
@@ -60,5 +61,12 @@
     "darwin",
     "linux",
     "win32"
-  ]
+  ],
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.5",
+    "eslint": "^10.13.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1"
+  }
 }

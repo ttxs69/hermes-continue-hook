@@ -11,6 +11,7 @@ the runtime behaviour is covered by two things:
 
 If Pi's extension API changes, this test is the first thing that should fail.
 """
+
 from __future__ import annotations
 
 import unittest
@@ -52,7 +53,6 @@ class TestPiExtensionContract(unittest.TestCase):
         self.assertIn("--nudge-text", self.src)
         self.assertNotIn("max_nudges_per_turn", self.src)
 
-
     def test_fails_open(self):
         """A detector error must never throw into Pi's event loop."""
         self.assertRegex(self.src, r"catch\s*\{[\s\S]{0,200}return undefined")
@@ -67,8 +67,9 @@ class TestPiExtensionContract(unittest.TestCase):
         """No second state file, no local counter, no local cooldown — one
         decision service, or the hosts disagree about the caps."""
         for symbol in ("STATE_PATH", "EVENTS_PATH", "bumpCounter", "function logEvent"):
-            self.assertNotIn(symbol, self.src,
-                             f"{symbol} belongs in hookctl.py, not in the Pi extension")
+            self.assertNotIn(
+                symbol, self.src, f"{symbol} belongs in hookctl.py, not in the Pi extension"
+            )
 
 
 class TestDetectorCli(unittest.TestCase):
@@ -82,9 +83,12 @@ class TestDetectorCli(unittest.TestCase):
         import json
         import subprocess
         import sys
-        r = subprocess.run([sys.executable, str(self.detector), "--text", text,
-                            "--attempt", str(attempt)],
-                           capture_output=True, timeout=30)
+
+        r = subprocess.run(
+            [sys.executable, str(self.detector), "--text", text, "--attempt", str(attempt)],
+            capture_output=True,
+            timeout=30,
+        )
         self.assertEqual(r.returncode, 0)
         return json.loads(r.stdout.decode().strip())
 

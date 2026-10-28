@@ -13,6 +13,7 @@ Config: ~/.hermes/continue_hook.json (shared with every other host).
 Env    : HERMES_CONTINUE_HOOK=0 disables.
 
 """
+
 from __future__ import annotations
 
 import sys
@@ -33,7 +34,6 @@ except ImportError:  # pragma: no cover - packaging guard
     raise SystemExit(0) from None
 
 
-
 def main() -> None:
     if _common.disabled():
         raise SystemExit(0)
@@ -43,7 +43,9 @@ def main() -> None:
         # The host is already continuing because of our block: this turn's
         # chain is over. Closing it resets the per-turn counter — skipping
         # this is what made the counter a quota shared across user turns.
-        _common.close_chain(session_id=_common.session_key(payload, "claude-code"), host="claude-code")
+        _common.close_chain(
+            session_id=_common.session_key(payload, "claude-code"), host="claude-code"
+        )
         raise SystemExit(0)
 
     cfg = _common.load_config()
@@ -62,7 +64,9 @@ def main() -> None:
         raise SystemExit(0)
 
     from detector import build_nudge
+
     _common.print_json({"decision": "block", "reason": build_nudge(decision.attempt)})
+
 
 if __name__ == "__main__":
     main()

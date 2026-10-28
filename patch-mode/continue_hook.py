@@ -29,9 +29,7 @@ __all__ = ["DEFAULTS", "ConfigStore", "build_nudge", "default_config", "detect"]
 # runs on the quote-stripped tail (found via live dogfooding: a report that
 # quoted the trigger patterns fired the trigger). Exclusion matching still
 # scans the RAW tail — the safe direction (skip more, nudge less).
-_QUOTE_RE = re.compile(
-    r"「[^」]{0,80}」|『[^』]{0,80}』|\u201c[^\u201d]{0,80}\u201d|'[^']{0,60}'"
-)
+_QUOTE_RE = re.compile(r"「[^」]{0,80}」|『[^』]{0,80}』|\u201c[^\u201d]{0,80}\u201d|'[^']{0,60}'")
 
 # A question mark inside a URL is not a question. Without this, a reply that
 # ends with a link ("docs at https://example.com/x?y=1") looked like a
@@ -58,12 +56,12 @@ NUDGE_TEMPLATE = (
 
 DEFAULTS: dict = {
     "enabled": True,
-    "dry_run": False,           # log-only rollout: record what would fire, never inject
+    "dry_run": False,  # log-only rollout: record what would fire, never inject
     # Caps. The per-turn counter resets when a turn ends without a nudge, so
     # "per turn" means per turn — not per session (the old implementation never
     # reset it, so two nudges silenced the hook for the rest of the session).
     "max_nudges_per_turn": 2,
-    "max_nudges_per_session": 20,   # backstop for hosts without a host-side cap
+    "max_nudges_per_session": 20,  # backstop for hosts without a host-side cap
     # Optional session-level rate limit between two nudges. Disabled by default:
     # the caps above already bound the loop, and a non-zero value silently
     # stops the hook from working for minutes after the first nudge.
@@ -73,21 +71,33 @@ DEFAULTS: dict = {
     "triggers": {
         # First-person offers — pushing a self-advancable decision back to the user.
         "offer": [
-            "要不要我", "要不要顺便", "是否需要我", "要不要继续",
+            "要不要我",
+            "要不要顺便",
+            "是否需要我",
+            "要不要继续",
             "需要我.{0,8}(做|写|建|发|补|加|出|跑|查|弄|搞)",
             "我可以(帮)?(你|您)?.{0,8}(做|写|建|发|补|加|出|跑|查|弄|搞)",
-            "我来做还是", "等我(先)?(做|写)完(再)?(给你|你)",
-            r"should i\b", r"do you want me to\b", r"shall i\b", r"want me to\b",
+            "我来做还是",
+            "等我(先)?(做|写)完(再)?(给你|你)",
+            r"should i\b",
+            r"do you want me to\b",
+            r"shall i\b",
+            r"want me to\b",
         ],
         # Hand-offs — deferring the decision without a question mark.
         "hand_off": [
             "(交给|留给)你(来)?(定|决定|判断|选)",
-            "你(来)?(定|决定|选)一下", "听你的", "等你(拍板|指示|点头|回复|确认)",
+            "你(来)?(定|决定|选)一下",
+            "听你的",
+            "等你(拍板|指示|点头|回复|确认)",
             r"(up to you|your call|let me know if)",
         ],
         # Confirmation-seeking endings.
         "confirm_seek": [
-            "这样(可以|行)吗", "没问题吧", "确认一下[？?]?$", "如果.{1,12}，要不要",
+            "这样(可以|行)吗",
+            "没问题吧",
+            "确认一下[？?]?$",
+            "如果.{1,12}，要不要",
             r"(does this (work|look ok)|thoughts\?)",
         ],
         # Any question mark in the closing tail. True/false is judged by the
@@ -221,7 +231,7 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     """
     if not text or not str(text).strip():
         return False, "empty"
-    tail = str(text).strip()[-_int(cfg.get("tail_chars", 240), 240):]
+    tail = str(text).strip()[-_int(cfg.get("tail_chars", 240), 240) :]
     ex = cfg.get("exclusions", {})
     if _compile(ex.get("boundary")).search(tail):
         return False, "boundary"
@@ -465,7 +475,8 @@ def _prune_sessions(state: dict[str, Any], now: float | None = None) -> None:
     for name in [
         name
         for name, entry in sessions.items()
-        if not isinstance(entry, dict) or _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cutoff
+        if not isinstance(entry, dict)
+        or _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cutoff
     ]:
         sessions.pop(name, None)
 
@@ -555,7 +566,11 @@ def decide(
 
     cfg = load_config(config_path)
     # The config may redirect the log (a private directory, a read-only home).
-    if events_path is None and isinstance(cfg.get("events_path"), str) and cfg["events_path"].strip():
+    if (
+        events_path is None
+        and isinstance(cfg.get("events_path"), str)
+        and cfg["events_path"].strip()
+    ):
         events_path = Path(str(cfg["events_path"])).expanduser()
     # The whole read-modify-write happens under the lock: two hooks firing at
     # once must not overwrite each other's counters.
@@ -572,9 +587,17 @@ def decide(
             platform=platform,
         )
 
-def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any],
-                   state_path: Path, events_path: Path | str | None,
-                   continued: bool, platform: str) -> Decision:
+def _decide_locked(
+    text: str,
+    *,
+    session_id: str,
+    host: str,
+    cfg: dict[str, Any],
+    state_path: Path,
+    events_path: Path | str | None,
+    continued: bool,
+    platform: str,
+) -> Decision:
     """The decision itself. Callers hold the state lock."""
     state = read_state(state_path)
     now = time.time()
@@ -613,7 +636,8 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
                 "session": session_id,
                 "host": host,
                 "platform": platform,
-                "decision": ("nudge" if nudge else "skip") + ("_dryrun" if cfg.get("dry_run") else ""),
+                "decision": ("nudge" if nudge else "skip")
+                + ("_dryrun" if cfg.get("dry_run") else ""),
                 "reason": reason,
                 "attempt": attempt,
                 "snippet": snippet,
@@ -648,7 +672,11 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
     if total >= max_per_session:
         return finish(False, "max_nudges_per_session")
     cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
-    if cooldown > 0 and total > 0 and now - _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cooldown:
+    if (
+        cooldown > 0
+        and total > 0
+        and now - _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cooldown
+    ):
         return finish(False, "cooldown")
 
     if cfg.get("dry_run"):

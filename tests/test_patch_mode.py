@@ -8,6 +8,7 @@ patterns, its own key names and a hardcoded private log path.
 It is generated now. This test fails when the generated file drifts from the
 engine, which is exactly the failure mode we are guarding against.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -25,10 +26,10 @@ BUILDER = REPO / "scripts" / "build-patch-mode.py"
 
 class TestPatchModeIsGenerated(unittest.TestCase):
     def test_generated_file_is_up_to_date(self):
-        result = subprocess.run([sys.executable, str(BUILDER), "--check"],
-                                capture_output=True, text=True, cwd=REPO)
-        self.assertEqual(result.returncode, 0,
-                         result.stdout + result.stderr)
+        result = subprocess.run(
+            [sys.executable, str(BUILDER), "--check"], capture_output=True, text=True, cwd=REPO
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_generator_is_wired_into_the_checks(self):
         """The check script and CI must both run the generator's check."""
@@ -122,7 +123,6 @@ class TestPatchModeStandalone(unittest.TestCase):
         self.assertNotIn("/home/", source)
 
 
-
 class TestTheGateIsOffUntilAsked(unittest.TestCase):
     """Installing the patch must not start nudging turns by itself.
 
@@ -145,7 +145,8 @@ print(continue_hook.continue_hook_enabled())
 """
         result = subprocess.run(
             [sys.executable, "-c", code],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             env={**os.environ, "HOME": self.home, **(env or {})},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -171,7 +172,9 @@ print(continue_hook.continue_hook_enabled())
 
     def test_a_configured_off_beats_the_environment(self):
         self.assertFalse(
-            self._enabled({"agent": {"continue_hook_enabled": False}}, {"HERMES_CONTINUE_HOOK": "1"})
+            self._enabled(
+                {"agent": {"continue_hook_enabled": False}}, {"HERMES_CONTINUE_HOOK": "1"}
+            )
         )
 
 

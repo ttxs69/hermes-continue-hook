@@ -37,7 +37,7 @@ The gate calls one function:
 ```python
 from agent.continue_hook import continue_hook_nudge
 
-nudge = continue_hook_nudge(agent, final_response)   # str | None
+nudge = continue_hook_nudge(agent, final_response)  # str | None
 ```
 
 `continue_hook_nudge` returns the nudge text when the reply ended by asking

@@ -15,6 +15,7 @@ Note: Codex reviews non-managed hooks — run /hooks once in the CLI to trust
 the newly installed hook.
 
 """
+
 from __future__ import annotations
 
 import sys
@@ -33,7 +34,6 @@ try:
 except ImportError:  # pragma: no cover - packaging guard
     sys.stderr.write("continue-hook: _common.py not found next to this script\n")
     raise SystemExit(0) from None
-
 
 
 def main() -> None:
@@ -64,7 +64,9 @@ def main() -> None:
         raise SystemExit(0)
 
     from detector import build_nudge
+
     _common.print_json({"decision": "block", "reason": build_nudge(decision.attempt)})
+
 
 if __name__ == "__main__":
     main()

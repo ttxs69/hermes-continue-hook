@@ -14,6 +14,7 @@ its runtime is not available in CI. What is verified here:
 The authoritative check for API drift is `adapters/dsh/typecheck.sh`, which
 compiles the plugin against the real `@deepseek-ai/dsh-*` packages.
 """
+
 from __future__ import annotations
 
 import json
@@ -69,7 +70,6 @@ class TestDshPluginContract(unittest.TestCase):
         self.assertIn("--nudge-text", self.src)
         self.assertNotIn("max_nudges_per_turn", self.src)
 
-
     def test_fails_open(self):
         self.assertRegex(self.src, r"catch\s*\{[\s\S]{0,120}fail open|fail open[\s\S]{0,200}catch")
 
@@ -114,9 +114,11 @@ class TestDetectorCli(unittest.TestCase):
         cls.detector = REPO / "detector.py"
 
     def _run(self, text: str, attempt: int = 0):
-        r = subprocess.run([sys.executable, str(self.detector), "--text", text,
-                            "--attempt", str(attempt)],
-                           capture_output=True, timeout=30)
+        r = subprocess.run(
+            [sys.executable, str(self.detector), "--text", text, "--attempt", str(attempt)],
+            capture_output=True,
+            timeout=30,
+        )
         self.assertEqual(r.returncode, 0)
         return json.loads(r.stdout.decode().strip())
 

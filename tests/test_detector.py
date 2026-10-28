@@ -1,5 +1,6 @@
 """Detector unit tests. Zero third-party deps; runs via `python tests/test_detector.py`
 or `python -m unittest discover -s tests`."""
+
 from __future__ import annotations
 
 import sys
@@ -111,8 +112,9 @@ class TestDetectEn(unittest.TestCase):
         only the trailing "?" caught it."""
         got, reason = detect("Should I also update the changelog?", 0, self.CFG)
         self.assertTrue(got)
-        self.assertNotEqual(reason, "trigger:question_mark",
-                            "the offer trigger should match before the fallback")
+        self.assertNotEqual(
+            reason, "trigger:question_mark", "the offer trigger should match before the fallback"
+        )
 
     def test_a_normal_english_offer_still_nudges(self):
         for text in (
@@ -131,8 +133,10 @@ class TestQuotedMentions(unittest.TestCase):
     CFG = default_config()
 
     def test_quoted_patterns_report(self):
-        report = ("我在任何会话以「要不要我…/你定/听你的/？…」收尾且不涉独占边界时，"
-                  "会被当场拦下。这条回复以句号结尾。")
+        report = (
+            "我在任何会话以「要不要我…/你定/听你的/？…」收尾且不涉独占边界时，"
+            "会被当场拦下。这条回复以句号结尾。"
+        )
         got, reason = detect(report, 0, self.CFG)
         self.assertFalse(got, reason)
 
@@ -167,6 +171,7 @@ class TestConfigStore(unittest.TestCase):
 
     def test_override_and_hot_reload(self):
         import time
+
         p = Path("/tmp/ch_hot.json")
         p.write_text('{"triggers": {"question_mark": false}}', encoding="utf-8")
         cs = ConfigStore(p)
@@ -283,8 +288,6 @@ class TestNudge(unittest.TestCase):
         self.assertIn("#1", build_nudge(0))
         self.assertIn("#2", build_nudge(1))
 
-
-
     def test_url_with_query_string_is_not_a_question(self):
         """A "?" inside a link is not a permission-seeking ending."""
         cfg = default_config()
@@ -302,7 +305,6 @@ class TestNudge(unittest.TestCase):
         should, reason = detect("文档 https://example.com/a?x=1 还需要我做什么？", 0, cfg)
         self.assertTrue(should)
         self.assertTrue(reason.startswith("trigger:"))
-
 
     def test_a_question_mark_in_code_is_not_a_question(self):
         """Ternaries and optional chaining are syntax, not questions."""
@@ -333,6 +335,7 @@ class TestNudge(unittest.TestCase):
         should, reason = detect("Should I also update the README?", 0, cfg)
         self.assertTrue(should)
         self.assertTrue(reason.startswith("trigger:"))
+
 
 if __name__ == "__main__":
     unittest.main()

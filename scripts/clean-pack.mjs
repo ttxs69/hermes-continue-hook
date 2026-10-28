@@ -8,7 +8,7 @@
  * It only ever deletes `__pycache__` directories and `*.pyc` / `*.pyo` files
  * inside the package root — nothing else, and never outside the root.
  */
-import { readdirSync, rmSync, statSync, existsSync } from "node:fs";
+import { readdirSync, rmSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 

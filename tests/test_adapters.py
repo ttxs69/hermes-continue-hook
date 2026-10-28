@@ -8,6 +8,7 @@ Hosts covered: Claude Code, Codex, Cursor, GitHub Copilot CLI, Gemini CLI.
 No third-party deps; runs via `python tests/test_adapters.py` or
 `python -m unittest discover -s tests`.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,16 +34,23 @@ ASK_ZH = "要不要我顺便也把示例补上？"
 PLAIN_ZH = "已完成，验证通过。"
 BOUNDARY_ZH = "这会花 $69，需要你批准后我才买。"
 
-CLAUDE_STYLE = json.dumps({
-    "type": "assistant",
-    "message": {"content": [{"type": "text", "text": ASK_ZH}]},
-}, ensure_ascii=False) + "\n"
+CLAUDE_STYLE = (
+    json.dumps(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": ASK_ZH}]},
+        },
+        ensure_ascii=False,
+    )
+    + "\n"
+)
 OPENAI_STYLE = json.dumps({"role": "assistant", "content": ASK_ZH}, ensure_ascii=False) + "\n"
 ARRAY_STYLE = json.dumps([{"role": "assistant", "content": ASK_ZH}], ensure_ascii=False)
 
 
-def run_hook(host: str, payload: dict, env: dict | None = None,
-             transcript: str | None = None) -> tuple[int, str]:
+def run_hook(
+    host: str, payload: dict, env: dict | None = None, transcript: str | None = None
+) -> tuple[int, str]:
     """Run a hook with an isolated HOME so the shared per-session state file
     (and the shared config) never leak between tests."""
     with tempfile.TemporaryDirectory() as td:
@@ -56,50 +64,80 @@ def run_hook(host: str, payload: dict, env: dict | None = None,
         e["HOME"] = str(home)
         e["HERMES_CONTINUE_HOOK"] = e.get("HERMES_CONTINUE_HOOK", "1")
         e.update(env or {})
-        r = subprocess.run([sys.executable, str(HOOKS[host])],
-                           input=json.dumps(payload).encode(),
-                           capture_output=True, env=e, timeout=30)
+        r = subprocess.run(
+            [sys.executable, str(HOOKS[host])],
+            input=json.dumps(payload).encode(),
+            capture_output=True,
+            env=e,
+            timeout=30,
+        )
         return r.returncode, r.stdout.decode().strip()
 
 
 def claude_payload(**kw):
-    base = {"session_id": "cc-1", "transcript_path": "/nonexistent.jsonl",
-            "stop_hook_active": False, "last_assistant_message": ""}
+    base = {
+        "session_id": "cc-1",
+        "transcript_path": "/nonexistent.jsonl",
+        "stop_hook_active": False,
+        "last_assistant_message": "",
+    }
     base.update(kw)
     return base
 
 
 def codex_payload(**kw):
-    base = {"session_id": "cx-1", "turn_id": "t1", "stop_hook_active": False,
-            "last_assistant_message": ""}
+    base = {
+        "session_id": "cx-1",
+        "turn_id": "t1",
+        "stop_hook_active": False,
+        "last_assistant_message": "",
+    }
     base.update(kw)
     return base
 
 
 def cursor_payload(**kw):
-    base = {"status": "completed", "loop_count": 0,
-            "conversation_id": "cv-1", "transcript_path": "/nonexistent.jsonl"}
+    base = {
+        "status": "completed",
+        "loop_count": 0,
+        "conversation_id": "cv-1",
+        "transcript_path": "/nonexistent.jsonl",
+    }
     base.update(kw)
     return base
 
 
 def copilot_payload(**kw):
-    base = {"sessionId": "cp-1", "timestamp": 1, "cwd": "/tmp",
-            "transcriptPath": "/nonexistent.jsonl", "stopReason": "end_turn"}
+    base = {
+        "sessionId": "cp-1",
+        "timestamp": 1,
+        "cwd": "/tmp",
+        "transcriptPath": "/nonexistent.jsonl",
+        "stopReason": "end_turn",
+    }
     base.update(kw)
     return base
 
 
 def qwen_payload(**kw):
-    base = {"session_id": "qw-1", "stop_hook_active": False,
-            "last_assistant_message": "", "transcript_path": "/nonexistent.jsonl"}
+    base = {
+        "session_id": "qw-1",
+        "stop_hook_active": False,
+        "last_assistant_message": "",
+        "transcript_path": "/nonexistent.jsonl",
+    }
     base.update(kw)
     return base
 
 
 def gemini_payload(**kw):
-    base = {"session_id": "gm-1", "prompt": "hi", "prompt_response": "",
-            "stop_hook_active": False, "transcript_path": "/nonexistent.jsonl"}
+    base = {
+        "session_id": "gm-1",
+        "prompt": "hi",
+        "prompt_response": "",
+        "stop_hook_active": False,
+        "transcript_path": "/nonexistent.jsonl",
+    }
     base.update(kw)
     return base
 
@@ -113,8 +151,9 @@ class TestClaudeCodeHook(unittest.TestCase):
         self.assertIn("continue-hook", data["reason"])
 
     def test_stop_hook_active_skips(self):
-        code, out = run_hook("claude-code",
-                             claude_payload(stop_hook_active=True, last_assistant_message=ASK_ZH))
+        code, out = run_hook(
+            "claude-code", claude_payload(stop_hook_active=True, last_assistant_message=ASK_ZH)
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -134,8 +173,11 @@ class TestClaudeCodeHook(unittest.TestCase):
         self.assertEqual(json.loads(out)["decision"], "block")
 
     def test_kill_switch(self):
-        code, out = run_hook("claude-code", claude_payload(last_assistant_message=ASK_ZH),
-                             env={"HERMES_CONTINUE_HOOK": "0"})
+        code, out = run_hook(
+            "claude-code",
+            claude_payload(last_assistant_message=ASK_ZH),
+            env={"HERMES_CONTINUE_HOOK": "0"},
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -149,8 +191,9 @@ class TestCodexHook(unittest.TestCase):
         self.assertIn("continue-hook", data["reason"])
 
     def test_stop_hook_active_skips(self):
-        code, out = run_hook("codex",
-                             codex_payload(stop_hook_active=True, last_assistant_message=ASK_ZH))
+        code, out = run_hook(
+            "codex", codex_payload(stop_hook_active=True, last_assistant_message=ASK_ZH)
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -165,8 +208,9 @@ class TestCodexHook(unittest.TestCase):
         self.assertEqual(out, "")
 
     def test_kill_switch(self):
-        code, out = run_hook("codex", codex_payload(last_assistant_message=ASK_ZH),
-                             env={"HERMES_CONTINUE_HOOK": "0"})
+        code, out = run_hook(
+            "codex", codex_payload(last_assistant_message=ASK_ZH), env={"HERMES_CONTINUE_HOOK": "0"}
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -198,14 +242,16 @@ class TestCursorHook(unittest.TestCase):
         self.assertEqual(out, "")
 
     def test_plain_transcript_allows_stop(self):
-        code, out = run_hook("cursor", cursor_payload(),
-                             transcript=CLAUDE_STYLE.replace(ASK_ZH, PLAIN_ZH))
+        code, out = run_hook(
+            "cursor", cursor_payload(), transcript=CLAUDE_STYLE.replace(ASK_ZH, PLAIN_ZH)
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
     def test_kill_switch(self):
-        code, out = run_hook("cursor", cursor_payload(), transcript=CLAUDE_STYLE,
-                             env={"HERMES_CONTINUE_HOOK": "0"})
+        code, out = run_hook(
+            "cursor", cursor_payload(), transcript=CLAUDE_STYLE, env={"HERMES_CONTINUE_HOOK": "0"}
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -219,23 +265,31 @@ class TestCopilotHook(unittest.TestCase):
         self.assertIn("continue-hook", data["reason"])
 
     def test_snake_case_input_accepted(self):
-        code, out = run_hook("copilot", {
-            "hook_event_name": "Stop", "session_id": "cp-2",
-            "transcript_path": "/nonexistent.jsonl", "stop_reason": "end_turn",
-            "stop_hook_active": False,
-        }, transcript=OPENAI_STYLE)
+        code, out = run_hook(
+            "copilot",
+            {
+                "hook_event_name": "Stop",
+                "session_id": "cp-2",
+                "transcript_path": "/nonexistent.jsonl",
+                "stop_reason": "end_turn",
+                "stop_hook_active": False,
+            },
+            transcript=OPENAI_STYLE,
+        )
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["decision"], "block")
 
     def test_stop_hook_active_skips(self):
-        code, out = run_hook("copilot", copilot_payload(stop_hook_active=True),
-                             transcript=OPENAI_STYLE)
+        code, out = run_hook(
+            "copilot", copilot_payload(stop_hook_active=True), transcript=OPENAI_STYLE
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
     def test_kill_switch(self):
-        code, out = run_hook("copilot", copilot_payload(), transcript=OPENAI_STYLE,
-                             env={"HERMES_CONTINUE_HOOK": "0"})
+        code, out = run_hook(
+            "copilot", copilot_payload(), transcript=OPENAI_STYLE, env={"HERMES_CONTINUE_HOOK": "0"}
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -249,7 +303,9 @@ class TestGeminiHook(unittest.TestCase):
         self.assertIn("continue-hook", data["reason"])
 
     def test_stop_hook_active_skips(self):
-        code, out = run_hook("gemini", gemini_payload(stop_hook_active=True, prompt_response=ASK_ZH))
+        code, out = run_hook(
+            "gemini", gemini_payload(stop_hook_active=True, prompt_response=ASK_ZH)
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -264,8 +320,9 @@ class TestGeminiHook(unittest.TestCase):
         self.assertEqual(out, "")
 
     def test_kill_switch(self):
-        code, out = run_hook("gemini", gemini_payload(prompt_response=ASK_ZH),
-                             env={"HERMES_CONTINUE_HOOK": "0"})
+        code, out = run_hook(
+            "gemini", gemini_payload(prompt_response=ASK_ZH), env={"HERMES_CONTINUE_HOOK": "0"}
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -281,7 +338,9 @@ class TestQwenHook(unittest.TestCase):
         self.assertIn("continue-hook", data["reason"])
 
     def test_stop_hook_active_skips(self):
-        code, out = run_hook("qwen", qwen_payload(stop_hook_active=True, last_assistant_message=ASK_ZH))
+        code, out = run_hook(
+            "qwen", qwen_payload(stop_hook_active=True, last_assistant_message=ASK_ZH)
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -291,8 +350,9 @@ class TestQwenHook(unittest.TestCase):
         self.assertEqual(out, "")
 
     def test_kill_switch(self):
-        code, out = run_hook("qwen", qwen_payload(last_assistant_message=ASK_ZH),
-                             env={"HERMES_CONTINUE_HOOK": "0"})
+        code, out = run_hook(
+            "qwen", qwen_payload(last_assistant_message=ASK_ZH), env={"HERMES_CONTINUE_HOOK": "0"}
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
@@ -306,6 +366,7 @@ class TestCommonHelpers(unittest.TestCase):
             if path not in sys.path:
                 sys.path.insert(0, path)
         import _common
+
         return _common
 
     def test_read_transcript_handles_three_shapes(self):
@@ -417,9 +478,19 @@ class TestASessionNeverDiesAfterTheCap(unittest.TestCase):
     def _run(self, home: Path, text: str) -> dict:
         env = {**os.environ, "HOME": str(home), "HERMES_CONTINUE_HOOK": "1"}
         result = subprocess.run(
-            [sys.executable, str(ROOT / "hookctl.py"),
-             "--text", text, "--session", "sess", "--host", "opencode"],
-            capture_output=True, env=env, timeout=30,
+            [
+                sys.executable,
+                str(ROOT / "hookctl.py"),
+                "--text",
+                text,
+                "--session",
+                "sess",
+                "--host",
+                "opencode",
+            ],
+            capture_output=True,
+            env=env,
+            timeout=30,
         )
         return json.loads(result.stdout.decode() or "{}")
 
@@ -428,7 +499,8 @@ class TestASessionNeverDiesAfterTheCap(unittest.TestCase):
             home = Path(td)
             (home / ".hermes").mkdir()
             (home / ".hermes" / "continue_hook.json").write_text(
-                json.dumps({"max_nudges_per_turn": 2}), encoding="utf-8")
+                json.dumps({"max_nudges_per_turn": 2}), encoding="utf-8"
+            )
 
             self.assertTrue(self._run(home, ASK_ZH)["should_nudge"])
             self.assertTrue(self._run(home, ASK_ZH)["should_nudge"])
@@ -469,18 +541,17 @@ class TestTheChainCloses(unittest.TestCase):
             self.assertIn("#1", first, "the first turn should nudge once")
 
             # the host continues because of our block, then ends cleanly
-            closed = self._run(home, claude_payload(
-                stop_hook_active=True, last_assistant_message=PLAIN_ZH))
+            closed = self._run(
+                home, claude_payload(stop_hook_active=True, last_assistant_message=PLAIN_ZH)
+            )
             self.assertEqual(closed, "", "a host-driven continuation must not nudge again")
 
             # a new user turn starts from zero — not from the previous turn's count
             second = self._run(home, claude_payload(last_assistant_message=ASK_ZH))
-            self.assertIn("#1", second,
-                          "the per-turn counter leaked into the next user turn")
+            self.assertIn("#1", second, "the per-turn counter leaked into the next user turn")
 
             # and it keeps working turn after turn (the old bug froze it at #2)
-            self._run(home, claude_payload(
-                stop_hook_active=True, last_assistant_message=PLAIN_ZH))
+            self._run(home, claude_payload(stop_hook_active=True, last_assistant_message=PLAIN_ZH))
             third = self._run(home, claude_payload(last_assistant_message=ASK_ZH))
             self.assertIn("#1", third)
 
@@ -490,8 +561,9 @@ class TestTheChainCloses(unittest.TestCase):
             (home / ".hermes").mkdir()
             for _ in range(3):
                 self._run(home, claude_payload(last_assistant_message=ASK_ZH))
-                self._run(home, claude_payload(
-                    stop_hook_active=True, last_assistant_message=PLAIN_ZH))
+                self._run(
+                    home, claude_payload(stop_hook_active=True, last_assistant_message=PLAIN_ZH)
+                )
             state = json.loads((home / ".hermes" / "continue-hook-state.json").read_text())
             entry = state["sessions"]["cc-1"]
             self.assertEqual(entry["count"], 0, "per-turn count must be closed out")
