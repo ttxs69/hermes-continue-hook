@@ -128,7 +128,10 @@ if (!existsSync(TSC)) {
   console.error("continue-hook dsh test: no tsc at", TSC);
   console.error("  node_modules present:", existsSync(path.join(WORK, "node_modules")));
   if (existsSync(path.join(WORK, "node_modules"))) {
-    console.error("  node_modules contains:", readdirSync(path.join(WORK, "node_modules")).join(", "));
+    console.error(
+      "  node_modules contains:",
+      readdirSync(path.join(WORK, "node_modules")).join(", "),
+    );
   }
   console.error("  npm on PATH:", execFileSync("which", ["npm"], { encoding: "utf8" }).trim());
 }
