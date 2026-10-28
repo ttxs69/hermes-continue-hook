@@ -138,6 +138,66 @@ cat ~/.hermes/continue-hook-events.jsonl | tail -5
 In Hermes, the same numbers are available as `/ch-stats`, and
 `/ch-test 要不要我继续？` dry-runs the detector on any sentence.
 
+## Verify it works — without waiting for a real conversation
+
+"Ask the agent something and hope" is not a test. This reproduces the whole
+chain in one command: the same detector, the same decision service, the same
+JSON the host receives — with a message that *must* be nudged and one that
+*must not* be.
+
+The published package contains the adapter, so this works **before** you
+install anything:
+
+```bash
+npm pack @ttxs69/hermes-continue-hook --silent   # → ttxs69-hermes-continue-hook-1.3.1.tgz
+tar xzf ttxs69-hermes-continue-hook-1.3.1.tgz
+
+# 1. the trigger fires on a permission-seeking ending
+printf '%s' '{"last_assistant_message":"好的，已经改完了。\n\n要不要我顺便把示例也补上？"}' \
+  | python3 package/adapters/claude-code/stop_hook.py
+
+# 2. a clean delivery is left alone
+printf '%s' '{"last_assistant_message":"已完成 README 优化。验证：lint 通过。"}' \
+  | python3 package/adapters/claude-code/stop_hook.py
+```
+
+Expected output — case 1 prints a JSON object asking the agent to re-check
+itself, case 2 prints nothing:
+
+```json
+{"decision": "block", "reason": "【continue-hook】Your last reply ended by asking the user a question.\nSelf-check once, per standing discipline:\n1. Does what you asked touch a user-only boundary …"}
+```
+
+If you already installed it, the same check runs against the installed copy:
+
+```bash
+printf '%s' '{"last_assistant_message":"要不要我继续？"}' \
+  | python3 ~/.hermes/continue-hook/claude-code/stop_hook.py
+```
+
+The hook only *asks the agent to look again*. Whether the question was
+legitimate is still the agent's call — that is the whole design.
+
+If case 1 prints nothing, the hook is not installed for that host. Run
+`npx @ttxs69/hermes-continue-hook check` to see which hosts are wired.
+
+## What it looks like in practice
+
+Measured on a real machine, over 60 evaluations (the plugin's own event log,
+`~/.hermes/continue-hook-events.jsonl`):
+
+| | |
+|---|---|
+| evaluations | 60 |
+| nudges | 32 (53% of evaluations) |
+| most common trigger | `trigger:offer` — 31 of 32 nudges |
+| skipped | `no_trigger` 14, `cooldown` 9, `stop_hook_active` 3, `boundary` 2 |
+
+A 53% hit rate means the agent really does end roughly every other turn with
+a permission-seeking question — that is the problem this exists for. The
+`boundary` skips are the important ones: they are the cases where asking
+was correct.
+
 ## How it works
 
 ```
