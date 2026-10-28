@@ -1,7 +1,7 @@
 {
   "name": "@ttxs69/hermes-continue-hook",
   "version": "1.3.2",
-  "description": "Stop the agent from asking permission for things it should just do — Claude Code, Codex, Qwen Code, Cursor, Copilot CLI, Gemini CLI, OpenCode, Pi, DeepSeek Harness, Hermes Agent.",
+  "description": "Stop your coding agent from ending every turn with a question it could answer itself. Conditional continuation for Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI, OpenCode and more.",
   "keywords": [
     "claude-code",
     "codex",

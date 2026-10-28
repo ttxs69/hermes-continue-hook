@@ -1,10 +1,15 @@
 # continue-hook
 
-**Stop the agent from asking permission for things it should just do.**
+**Stop your agent from ending every turn with a question it could answer itself.**
 
-An agent that ends its turn with 「要不要我顺便把这个补上？」 hands the user a
-decision the agent was already able to make. continue-hook catches that
-ending, asks the agent to re-check it once, and lets it finish the work.
+> 「Do you want me to continue?」 · 「要我顺便把这个也做了吗？」 · 「Want me to run the tests?」
+
+Your agent finishes the work — then asks whether it may do the next obvious
+thing. It hands you a decision it was already able to make, and you spend a
+turn on a one-word answer. On a busy day that is dozens of wasted round-trips.
+
+continue-hook catches that ending, asks the agent to re-check it once, and lets
+it finish the work.
 
 **别再问了，直接做完。**
 
@@ -14,8 +19,12 @@ Gemini CLI · OpenCode · Pi · DeepSeek Harness · Hermes Agent
 ```
 
 It never decides for the agent: the detection layer only says *this reply
-looks like it is asking permission*; the agent keeps the final word on whether
+looks like it is ending on an offer*; the agent keeps the final word on whether
 the question was legitimate.
+
+> **Not the same thing as permission prompts.** Claude Code's `⏵ Allow Bash(…)`
+> dialog is a *tool-permission* question and this plugin does not touch it.
+> What this catches is the agent asking *you* whether to keep working.
 
 [![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
