@@ -24,9 +24,11 @@ The split is measured, not guessed: the full gate takes about a minute
 before every commit.
 
 `pre-commit` also refuses to run on the wrong node — it reads `.nvmrc` and
-fails if the major version does not match. That check exists because a
-commit made with a different node produces a different result than the same
-commit in CI, and the difference is invisible until CI runs it.
+compares the **whole version**, not just the major. That distinction is not
+pedantry: `.nvmrc` held `24`, CI resolved that range to 24.21.0, and this
+machine ran 24.22.1, so the check passed while the two environments still
+differed. A commit made on a different node produces a different result than
+the same commit in CI, and the difference is invisible until CI runs it.
 
 Bypass either one with `git commit --no-verify` / `git push --no-verify`.
 

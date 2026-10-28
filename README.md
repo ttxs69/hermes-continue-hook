@@ -425,9 +425,11 @@ the fast checks on the files you staged (~2 s), and a `pre-push` that runs
 the whole gate (~60 s) — so a mismatch with CI shows up before the push
 rather than after it. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Use the node version in `.nvmrc` (`nvm use`); the gate and the hooks both
-refuse to run on a different one, because a check that runs on a different
-node than CI does not predict CI.
+Use the **exact** node version in `.nvmrc` (`nvm use`). The gate and the
+hooks compare the whole version and refuse to run on anything else. A major
+prefix is a range, and a range resolves differently in different places:
+`.nvmrc` held `24`, CI resolved it to 24.21.0, and this machine ran 24.22.1.
+A check that runs on a different node than CI does not predict CI.
 
 ### Quality gates
 
