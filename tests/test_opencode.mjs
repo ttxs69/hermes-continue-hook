@@ -17,7 +17,7 @@ const HOME = mkdtempSync(path.join(tmpdir(), "ch-oc-"));
 mkdirSync(path.join(HOME, ".hermes"), { recursive: true });
 process.env.HOME = HOME;
 
-const { handleIdle, lastAssistantText } = await import(
+const { handleIdle, lastAssistantText, ContinueHookPlugin } = await import(
   path.join(REPO, "adapters", "opencode", "continue-hook.js")
 );
 
@@ -82,6 +82,30 @@ await test("permission-seeking ending triggers exactly one continuation", async 
   const body = calls.prompts[0];
   const text = body.parts ? body.parts[0].text : body.body.parts[0].text;
   assert.ok(text.includes("continue-hook"));
+});
+
+await test("the registered session.idle handler actually nudges", async () => {
+  // Every other test calls handleIdle() directly — which is why a ReferenceError
+  // inside the *registered* handler (a leftover `state` argument after the
+  // debounce was removed) passed CI while OpenCode could never fire at all.
+  const { client, calls } = mockClient([user("go"), assistant(ASK)]);
+  const plugin = await ContinueHookPlugin({ client });
+  await plugin.event({ event: { type: "session.idle", properties: { sessionID: "h1" } } });
+  assert.strictEqual(calls.prompts.length, 1, "the handler must prompt exactly once");
+});
+
+await test("the registered handler stays silent for a clean reply", async () => {
+  const { client, calls } = mockClient([assistant(PLAIN)]);
+  const plugin = await ContinueHookPlugin({ client });
+  await plugin.event({ event: { type: "session.idle", properties: { sessionID: "h2" } } });
+  assert.strictEqual(calls.prompts.length, 0);
+});
+
+await test("the registered handler ignores other event types", async () => {
+  const { client, calls } = mockClient([assistant(ASK)]);
+  const plugin = await ContinueHookPlugin({ client });
+  await plugin.event({ event: { type: "session.updated", properties: { sessionID: "h3" } } });
+  assert.strictEqual(calls.prompts.length, 0);
 });
 
 await test("declarative ending does not continue", async () => {

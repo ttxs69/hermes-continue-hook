@@ -360,6 +360,50 @@ class TestCommonHelpers(unittest.TestCase):
         self.assertEqual(common.host_loop_count({}), 0)
 
 
+class TestTheCapHoldsAcrossRepeatedStops(unittest.TestCase):
+    """A cap must not reset itself.
+
+    Every skip used to close the chain, so eight identical stop events produced
+    six nudges with ``max_nudges_per_turn: 2`` — each "max_nudges" skip reset
+    the counter that had just blocked it.
+    """
+
+    def _run(self, home: Path, payload: dict) -> str:
+        env = {**os.environ, "HOME": str(home), "HERMES_CONTINUE_HOOK": "1"}
+        result = subprocess.run(
+            [sys.executable, str(HOOKS["claude-code"])],
+            input=json.dumps(payload).encode(),
+            capture_output=True,
+            env=env,
+            timeout=30,
+        )
+        return result.stdout.decode().strip()
+
+    def test_eight_identical_stops_give_two_nudges(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".hermes").mkdir()
+            nudges = 0
+            for _ in range(8):
+                if self._run(home, claude_payload(last_assistant_message=ASK_ZH)):
+                    nudges += 1
+            self.assertEqual(nudges, 2, "the per-turn cap must hold across stops")
+
+    def test_the_environment_kill_switch_is_honoured_everywhere(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".hermes").mkdir()
+            env = {**os.environ, "HOME": str(home), "HERMES_CONTINUE_HOOK": "0"}
+            result = subprocess.run(
+                [sys.executable, str(HOOKS["claude-code"])],
+                input=json.dumps(claude_payload(last_assistant_message=ASK_ZH)).encode(),
+                capture_output=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(result.stdout.decode().strip(), "")
+
+
 class TestTheChainCloses(unittest.TestCase):
     """A continuation the host performed ends *this* turn's chain.
 

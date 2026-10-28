@@ -58,12 +58,14 @@ const HOSTS = {
     label: "Claude Code",
     kind: "claude-stop",
     config: ".claude/settings.json",
+    detect: ".claude",
     hook: "claude-code/stop_hook.py",
   },
   codex: {
     label: "Codex CLI",
     kind: "claude-stop",
     config: ".codex/hooks.json",
+    detect: ".codex",
     hook: "codex/stop_hook.py",
     note: "run /hooks once in the Codex CLI to trust the new hook",
   },
@@ -71,42 +73,49 @@ const HOSTS = {
     label: "Qwen Code",
     kind: "claude-stop",
     config: ".qwen/settings.json",
+    detect: ".qwen",
     hook: "qwen/stop_hook.py",
   },
   cursor: {
     label: "Cursor",
     kind: "cursor-stop",
     config: ".cursor/hooks.json",
+    detect: ".cursor",
     hook: "cursor/stop_hook.py",
   },
   copilot: {
     label: "GitHub Copilot CLI",
     kind: "copilot-stop",
     config: ".copilot/hooks/continue-hook.json",
+    detect: ".copilot",
     hook: "copilot/stop_hook.py",
   },
   gemini: {
     label: "Gemini CLI",
     kind: "gemini-after",
     config: ".gemini/settings.json",
+    detect: ".gemini",
     hook: "gemini/stop_hook.py",
   },
   opencode: {
     label: "OpenCode",
     kind: "file",
     target: ".config/opencode/plugin/continue-hook.js",
+    detect: ".config/opencode",
     source: "adapters/opencode/continue-hook.js",
   },
   pi: {
     label: "Pi",
     kind: "file",
     target: ".pi/agent/extensions/continue-hook.ts",
+    detect: ".pi/agent",
     source: "adapters/pi/continue-hook.ts",
   },
   dsh: {
     label: "DeepSeek Harness",
     kind: "dsh",
     target: ".hermes/continue-hook/dsh",
+    detect: ".dsh",
   },
   skills: {
     label: "Portable skills layer",
@@ -160,9 +169,13 @@ function parseArgs(argv) {
  * settings.json — including a JSONC file with comments, which many hosts
  * accept and JSON.parse does not. Callers get the error so they can refuse.
  */
-function readJson(file, { allowBroken = false } = {}) {
+function readJson(file, { allowBroken = false, dryRun = false } = {}) {
   if (!existsSync(file)) return {};
-  const raw = readFileSync(file, "utf8");
+  let raw = readFileSync(file, "utf8");
+  // A UTF-8 BOM is what Notepad and several Windows tools write; JSON.parse
+  // rejects it, which made install impossible on such a file with a message
+  // blaming a trailing comma.
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
   if (!raw.trim()) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -170,11 +183,13 @@ function readJson(file, { allowBroken = false } = {}) {
   } catch (err) {
     if (allowBroken) return {};
     const backup = `${file}.bak-${Date.now()}`;
-    writeFileSync(backup, raw, "utf8");
+    // A dry run must leave the disk untouched — including the backup.
+    if (!dryRun) writeFileSync(backup, raw, "utf8");
     console.error(
       `✗ ${file} is not valid JSON (${err.message}).\n` +
-        `  Nothing was written. The original is copied to:\n    ${backup}\n` +
-        `  Fix the file (a trailing comma or a // comment is the usual cause) and re-run.`,
+        `  Nothing was written. ` +
+        (dryRun ? `A real run would copy the original to ${backup}.` : `The original is copied to:\n    ${backup}`) +
+        `\n  Fix the file (a trailing comma or a // comment is the usual cause) and re-run.`,
     );
     process.exit(3);
   }
@@ -260,8 +275,14 @@ const installedHosts = () => {
       if (SKILL_DIRS.some((d) => existsSync(path.join(expand(d), "continue-hook", "SKILL.md")))) out.push(host);
       continue;
     }
-    if (def.kind === "file" || def.kind === "dsh") {
-      if (existsSync(expand(def.target))) out.push(host);
+    if (def.kind === "file") {
+      // A user's own extension at that path is not ours; deleting it would be
+      // the same data loss as the JSON-hook bug.
+      if (isOurFile(expand(def.target))) out.push(host);
+      continue;
+    }
+    if (def.kind === "dsh") {
+      if (isOurFile(path.join(expand(def.target), "package.json"))) out.push(host);
       continue;
     }
     const data = readJson(expand(def.config));
@@ -347,27 +368,53 @@ function removeOurs(data, kind) {
   return data;
 }
 
-const copyIfMissing = (from, to, dryRun) => {
-  if (!existsSync(from)) return false;
+/** Markers that identify a file as ours, whatever the host. */
+const OURS_FILE_MARKERS = ["continue-hook", "hookctl.py"];
+
+/** True when the file at `file` exists and was written by this tool. */
+const isOurFile = (file) => {
+  try {
+    if (!existsSync(file)) return false;
+    const head = readFileSync(file, "utf8").slice(0, 4000);
+    return OURS_FILE_MARKERS.some((marker) => head.includes(marker));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Copy a file into place, backing up anything that is not already ours.
+ *
+ * It used to be called copyIfMissing but always overwrote (“if missing” was
+ * only true of the *source*). A user's own hand-written extension at the same
+ * path was replaced without a word.
+ */
+const copyFile = (from, to, dryRun) => {
+  if (!existsSync(from)) return { ok: false, reason: "source-missing" };
+  if (existsSync(to) && !isOurFile(to)) {
+    const backup = `${to}.bak-${Date.now()}`;
+    if (!dryRun) copyFileSync(to, backup);
+    console.error(`! ${to} was not written by continue-hook — saved to ${backup} before replacing it`);
+  }
   if (!dryRun) {
     mkdirSync(path.dirname(to), { recursive: true });
     copyFileSync(from, to);
   }
-  return true;
+  return { ok: true };
 };
 
 // ── commands ───────────────────────────────────────────────────────────────
 function installRuntime(opts) {
   for (const file of RUNTIME_FILES) {
-    copyIfMissing(path.join(PKG_ROOT, file), path.join(RUNTIME_DIR, file), opts.dryRun);
+    copyFile(path.join(PKG_ROOT, file), path.join(RUNTIME_DIR, file), opts.dryRun);
   }
   for (const file of TRANSPORT_FILES) {
-    copyIfMissing(path.join(PKG_ROOT, file.from), path.join(RUNTIME_DIR, file.to), opts.dryRun);
+    copyFile(path.join(PKG_ROOT, file.from), path.join(RUNTIME_DIR, file.to), opts.dryRun);
   }
   for (const host of HOST_NAMES) {
     const def = HOSTS[host];
     if (def.kind === "claude-stop" || def.kind === "cursor-stop" || def.kind === "copilot-stop" || def.kind === "gemini-after") {
-      copyIfMissing(path.join(PKG_ROOT, "adapters", def.hook), path.join(RUNTIME_DIR, def.hook), opts.dryRun);
+      copyFile(path.join(PKG_ROOT, "adapters", def.hook), path.join(RUNTIME_DIR, def.hook), opts.dryRun);
     }
   }
 }
@@ -379,7 +426,7 @@ function installHost(host, opts) {
   if (def.kind === "skills") {
     for (const dir of opts.skillsExplicit ? SKILL_DIRS : skillTargetDirs()) {
       const target = path.join(expand(dir), "continue-hook", "SKILL.md");
-      const ok = copyIfMissing(path.join(PKG_ROOT, "skills", "continue-hook", "SKILL.md"), target, opts.dryRun);
+      const ok = copyFile(path.join(PKG_ROOT, "skills", "continue-hook", "SKILL.md"), target, opts.dryRun).ok;
       results.push({ path: target, ok });
     }
     return results;
@@ -387,7 +434,7 @@ function installHost(host, opts) {
 
   if (def.kind === "file") {
     const target = expand(def.target);
-    const ok = copyIfMissing(path.join(PKG_ROOT, def.source), target, opts.dryRun);
+    const ok = copyFile(path.join(PKG_ROOT, def.source), target, opts.dryRun).ok;
     results.push({ path: target, ok });
     return results;
   }
@@ -395,17 +442,16 @@ function installHost(host, opts) {
   if (def.kind === "dsh") {
     const target = expand(def.target);
     for (const file of ["src/index.ts", "package.json", "cordis.patch.yml", "tsconfig.json"]) {
-      results.push({ path: path.join(target, file), ok: copyIfMissing(path.join(PKG_ROOT, "adapters", "dsh", file), path.join(target, file), opts.dryRun) });
+      results.push({ path: path.join(target, file), ok: copyFile(path.join(PKG_ROOT, "adapters", "dsh", file), path.join(target, file), opts.dryRun).ok });
     }
-    results.push({ path: path.join(target, "hookctl.py"), ok: copyIfMissing(path.join(PKG_ROOT, "hookctl.py"), path.join(target, "hookctl.py"), opts.dryRun) });
-    results.push({ path: path.join(target, "detector.py"), ok: copyIfMissing(path.join(PKG_ROOT, "detector.py"), path.join(target, "detector.py"), opts.dryRun) });
+    results.push({ path: path.join(target, "hookctl.py"), ok: copyFile(path.join(PKG_ROOT, "hookctl.py"), path.join(target, "hookctl.py"), opts.dryRun).ok });
+    results.push({ path: path.join(target, "detector.py"), ok: copyFile(path.join(PKG_ROOT, "detector.py"), path.join(target, "detector.py"), opts.dryRun).ok });
     return results;
   }
 
   // JSON-config hosts
   const configPath = expand(def.config);
-  const existed = existsSync(configPath);
-  const data = readJson(configPath);
+  const data = readJson(configPath, { dryRun: opts.dryRun });
   const hookCmd = hookCommand(def.hook);
   const patched = patchHooks(data, def.kind, hookCmd);
   if (!opts.dryRun) writeJson(configPath, patched);
@@ -426,18 +472,37 @@ function uninstallHost(host, opts) {
   }
   if (def.kind === "file") {
     const target = expand(def.target);
-    if (existsSync(target) && !opts.dryRun) rmSync(target, { force: true });
+    if (!existsSync(target)) {
+      results.push({ path: `${target} (absent)`, ok: true });
+      return results;
+    }
+    if (!isOurFile(target)) {
+      console.error(`! ${target} was not written by continue-hook — leaving it alone`);
+      results.push({ path: `${target} (not ours)`, ok: true });
+      return results;
+    }
+    if (!opts.dryRun) rmSync(target, { force: true });
     results.push({ path: target, ok: true });
     return results;
   }
   if (def.kind === "dsh") {
     const target = expand(def.target);
-    if (existsSync(target) && !opts.dryRun) rmSync(target, { recursive: true, force: true });
+    if (!isOurFile(path.join(target, "package.json"))) {
+      results.push({ path: `${target} (not ours)`, ok: true });
+      return results;
+    }
+    if (!opts.dryRun) rmSync(target, { recursive: true, force: true });
     results.push({ path: target, ok: true });
     return results;
   }
   const configPath = expand(def.config);
-  const data = readJson(configPath);
+  if (!existsSync(configPath)) {
+    // "removes only what this tool installed" — an uninstall must never create
+    // the host's config file on a machine that never had one.
+    results.push({ path: `${configPath} (absent)`, ok: true });
+    return results;
+  }
+  const data = readJson(configPath, { allowBroken: true });
   const cleaned = removeOurs(data, def.kind);
   if (!opts.dryRun) writeJson(configPath, cleaned);
   results.push({ path: configPath, ok: true });
@@ -446,23 +511,26 @@ function uninstallHost(host, opts) {
 
 function checkHost(host) {
   const def = HOSTS[host];
+  // `check` is read-only. readJson() backs the file up and exits 3 on a parse
+  // error, which turned a diagnostic into a mutation.
+
   if (def.kind === "skills") {
     const found = SKILL_DIRS.filter((d) => existsSync(path.join(expand(d), "continue-hook", "SKILL.md")));
     return { host, label: def.label, installed: found.length > 0, detail: `${found.length}/${SKILL_DIRS.length} skill dirs` };
   }
   if (def.kind === "file") {
     const target = expand(def.target);
-    return { host, label: def.label, installed: existsSync(target), detail: target };
+    return { host, label: def.label, installed: isOurFile(target), detail: target };
   }
   if (def.kind === "dsh") {
     const target = expand(def.target);
-    return { host, label: def.label, installed: existsSync(path.join(target, "src", "index.ts")), detail: target };
+    return { host, label: def.label, installed: isOurFile(path.join(target, "package.json")), detail: target };
   }
   const configPath = expand(def.config);
   if (!existsSync(configPath)) {
     return { host, label: def.label, installed: false, detail: `${configPath} (absent)` };
   }
-  const data = readJson(configPath);
+  const data = readJson(configPath, { allowBroken: true });
   const key =
     def.kind === "cursor-stop" ? "stop" : def.kind === "copilot-stop" ? "agentStop" : def.kind === "gemini-after" ? "AfterAgent" : "Stop";
   const list = data?.hooks?.[key];
@@ -476,8 +544,11 @@ function doctor() {
   const rows = [];
   for (const host of HOST_NAMES) {
     const def = HOSTS[host];
+    // Detect the *host*, not our own artefact: checking for our config file
+    // (or our plugin path) can never be true before the first install, so
+    // "--host all" refused to install on a machine that only had the directory.
     const detected =
-      def.kind === "skills" ? false : existsSync(expand(def.config ?? def.target ?? "."));
+      def.kind === "skills" ? false : existsSync(expand(def.detect ?? def.config ?? def.target ?? "."));
     rows.push({ host, label: def.label, detected });
   }
   return rows;

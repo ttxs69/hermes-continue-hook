@@ -53,7 +53,7 @@ Entry point used by the core stop gate:
 from __future__ import annotations
 
 import json
-import os as _os
+import os
 import re
 import time
 from pathlib import Path
@@ -84,7 +84,7 @@ def continue_hook_enabled() -> bool:
         # Nothing configured (a fresh install, a test, a bare import): the gate
         # stays off rather than guessing. HERMES_CONTINUE_HOOK=1 is the
         # explicit opt-in; HERMES_CONTINUE_HOOK=0 is the kill switch below.
-        return _os.environ.get("HERMES_CONTINUE_HOOK") == "1"
+        return os.environ.get("HERMES_CONTINUE_HOOK") == "1"
     return bool(switch)
 
 
@@ -95,7 +95,7 @@ def continue_hook_nudge(agent, final_response) -> str | None:
     turn end. Every failure is silent: a broken gate must not break the loop.
     """
     try:
-        if _os.environ.get("HERMES_CONTINUE_HOOK") == "0":
+        if os.environ.get("HERMES_CONTINUE_HOOK") == "0":
             return None
         if not continue_hook_enabled():
             return None

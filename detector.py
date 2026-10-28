@@ -93,8 +93,10 @@ DEFAULTS: dict = {
         # destructive actions.
         "boundary": [
             "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
-            "买|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱",
-            "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她)",
+            "买(?!账)|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱|付款|报价",
+            "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她|公众号|子|列表|名单)|"
+            "发布(到|至|上)|推(送)?到|上线|导出.{0,4}(数据|客户|用户)|"
+            "npm|pypi|npmjs|github release|生产(环境|库|服务器)",
             "生产环境|线上环境|主分支|改数据库|重启服务",
             # Money, credentials, destructive actions and external sending are
             # all user-only. The English list has to be as wide as the Chinese
@@ -102,8 +104,17 @@ DEFAULTS: dict = {
             # through a payment, a deletion or a send.
             r"\b(paid|paying|prepay|subscription|upgrade to (pro|paid|premium))\b|"
             r"\b(cost|costs|charge|charges|spend|spent|price|priced|budget|fee|fees)\b|"
-            r"\b(pay|paid|paying|payment|purchase|buy|renew|refund|invoice|billing|"
-            r"wire|transfer|remit|hire|contract|quote)\b|"
+            # Money verbs need a money object. A bare `pay`/`buy`/`transfer`
+            # blocked ordinary work ("pay attention to the lint warnings",
+            # "transfer the helper into its own module") — 47% of realistic
+            # endings lost their nudge to this.
+            r"\b(payment|purchase|renew|refund|invoice|billing|subscription|paid)\b|"
+            r"\bpay(?:ing)?\b(?!\s+attention)\s*(?:for\b|the\b|\$|\d|him|her|them|it\b)|"
+            r"\bbuy\s+(?:the|a|an|this|that|it|them|more|\$|\d)\b|"
+            r"\b(?:wire|transfer|remit)\s+(?:the\s+|my\s+|our\s+)?(?:money|funds|amount|payment|\$|\d)|"
+            r"\bhire\s+(?:a\s+|an\s+|the\s+)?(?:contractor|freelancer|developer|dev|person|someone|agency|consultant)\b|"
+            r"\bsign\s+(?:the\s+)?(?:contract|agreement|deal|nda|quote)\b|"
+            r"\bget(?:ting)?\s+a\s+quote\b|"
             r"[$€£¥]\s*\d|\d\s*(usd|eur|cny|rmb|dollars?)\b|"
             r"\b(api key|api keys|secret|secrets|credential|credentials|token|"
             r"access key|private key|ssh key|passphrase|password|2fa|otp|verification code)\b|"

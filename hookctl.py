@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections.abc import Iterable
@@ -206,7 +207,13 @@ def log_event(
         record = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), **event}
         if not snippet:
             record.pop("snippet", None)
+        created_dir = not events_path.parent.exists()
         events_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if created_dir:
+            try:
+                events_path.parent.chmod(0o700)
+            except OSError:
+                pass
         with open(events_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         try:
@@ -309,6 +316,23 @@ def decide(
     ``stop_hook_active``). Hosts that do not report it can leave it ``False``:
     the chain is tracked in the state file either way.
     """
+    # The documented kill switch, in one place so that every caller (plugin,
+    # shell adapters, patch mode) honours it. The plugin mode used to ignore it.
+    if os.environ.get("HERMES_CONTINUE_HOOK") == "0":
+        log_event(
+            {
+                "session": session_id,
+                "host": host,
+                "platform": platform,
+                "decision": "skip",
+                "reason": "disabled_env",
+                "attempt": 0,
+                "snippet": "",
+            },
+            events_path,
+        )
+        return Decision(should_nudge=False, reason="disabled_env", attempt=0)
+
     cfg = load_config(config_path)
     # The config may redirect the log (a private directory, a read-only home).
     if events_path is None and isinstance(cfg.get("events_path"), str) and cfg["events_path"].strip():
@@ -346,16 +370,23 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
     total = int(_num(entry.get("total", 0), 0, integer=True))
     snippet = (text or "")[-160:]
 
+    # Reasons that mean "this turn really ended" — the next user turn starts
+    # from zero. Everything else (a cap, a cooldown, an empty reply) must keep
+    # the chain open: resetting there let 8 identical stop events produce 6
+    # nudges with max_nudges_per_turn: 2.
+    closing_reasons = {"no_trigger", "boundary", "user_must"}
+
     def finish(nudge: bool, reason: str) -> Decision:
         if nudge:
             entry["count"] = attempt + 1
             entry["total"] = total + 1
             entry["last_ts"] = now
             entry["chain"] = True
-        else:
+        elif reason in closing_reasons:
             # The turn ended without a nudge — close the chain.
             entry["count"] = 0
             entry["chain"] = False
+        # else: leave the chain (and the per-turn counter) exactly as it was.
         state["version"] = STATE_VERSION
         write_state(state, state_path)
         log_event(

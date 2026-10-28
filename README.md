@@ -277,7 +277,7 @@ of date.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests   # 136 tests: detector, plugin, 8 adapters, dsh/pi contracts
+python3 -m unittest discover -s tests   # 141 tests: detector, plugin, 8 adapters, dsh/pi contracts
 node tests/test_opencode.mjs            # 10 tests: OpenCode plugin against a mock SDK client
 node tests/test_installer.mjs           # 21 tests: install / idempotence / uninstall / non-destruction
 node tests/test_dsh.mjs                 # 7 tests: dsh plugin, compiled against the real dsh packages
@@ -293,13 +293,13 @@ everything else runs offline.
 |---|---|---|---|
 | **Plugin (default)** | ✗ (follow-up turn, full context) | ✅ | `hermes plugins install` |
 | **Patch mode** — a core stop gate; version-pinned, see the caveat below | ✅ | ✗ | `patch-mode/install.sh <hermes-agent-path>` |
+| **Preventive layer** — standing reminder appended to user messages (optional `hooks.pre_llm_call`) | prevention | ✅ | copy `agent-hooks/ch_preventive.sh` into `~/.hermes/agent-hooks/` and register it |
+| Upstream PR (make `pre_verify` fire on all text stops) | ✅ | ✅ after merge | roadmap |
 
 Patch mode touches **four core files** (three modified, one new) and is pinned to
 core commit `d923a5e`. `patch-mode/install.sh --check <path>` tells you whether
 your tree is one it can patch; the installer refuses anything else rather than
 half-applying a stale diff.
-| **Preventive layer** — standing reminder appended to user messages (optional `hooks.pre_llm_call`) | prevention | ✅ | copy `agent-hooks/ch_preventive.sh` into `~/.hermes/agent-hooks/` and register it |
-| Upstream PR (make `pre_verify` fire on all text stops) | ✅ | ✅ after merge | roadmap |
 
 Twelve approaches were evaluated against this matrix; the rejected ones and
 their source-verified reasons are in [`docs/DESIGN.md`](docs/DESIGN.md).
@@ -337,8 +337,9 @@ rule fired (`trigger:offer`, `boundary`, `user_must`, `cooldown`, `max_nudges`,
 
 **Privacy:** each record carries the last ~160 characters of the reply as
 `snippet`, so you can see why a decision was made. That is agent output, not
-user input, but it is still conversation content — the log is written `0600`
-next to a `0700` directory. Set `"log_snippet": false` to record the decision
+user input, but it is still conversation content — the log file is written
+`0600`, and the directory is created `0700` when this tool creates it. Set
+`"log_snippet": false` to record the decision
 without the text, or point `"events_path"` at a directory you control.
 
 ## Development

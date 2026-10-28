@@ -238,6 +238,46 @@ class TestMoneyIsAlwaysABoundary(unittest.TestCase):
             self.assertFalse(got, f"{text} → {reason}")
 
 
+class TestMoneyBoundariesDoNotEatRealWork(unittest.TestCase):
+    """The money list must not turn ordinary engineering talk into a boundary.
+
+    Widening it to bare pay/buy/transfer/wire/hire blocked 47% of realistic
+    endings ("pay attention to the lint warnings", "transfer the helper into
+    its own module").
+    """
+
+    def test_these_are_still_nudged(self):
+        cfg = default_config()
+        for text in (
+            "Should I pay attention to the lint warnings?",
+            "Should I transfer the helper into its own module?",
+            "Should I contract the two helpers into one?",
+            "Should I wire this callback to the store?",
+            "Should I hire a stub for the test?",
+            "Should I buy into the event-sourcing pattern?",
+            "要不要我买账这个方案？",
+        ):
+            got, reason = detect(text, 0, cfg)
+            self.assertTrue(got, f"{text} → {reason}")
+
+
+class TestPublishingIsABoundary(unittest.TestCase):
+    def test_publishing_and_shipping_outward(self):
+        cfg = default_config()
+        for text in (
+            "要不要我发布到 npm？",
+            "要不要我发布到 PyPI？",
+            "要不要我推送到线上？",
+            "要不要我导出客户数据？",
+            "要不要我发到公众号？",
+            "Should I publish it to npm?",
+            "Should I deploy to production?",
+            "Should I push to main?",
+        ):
+            got, reason = detect(text, 0, cfg)
+            self.assertFalse(got, f"{text} → {reason}")
+
+
 class TestNudge(unittest.TestCase):
     def test_attempt_numbering(self):
         self.assertIn("#1", build_nudge(0))

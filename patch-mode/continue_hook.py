@@ -17,7 +17,7 @@ Entry point used by the core stop gate:
 from __future__ import annotations
 
 import json
-import os as _os
+import os
 import re
 import time
 from pathlib import Path
@@ -101,8 +101,10 @@ DEFAULTS: dict = {
         # destructive actions.
         "boundary": [
             "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
-            "买|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱",
-            "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她)",
+            "买(?!账)|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱|付款|报价",
+            "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她|公众号|子|列表|名单)|"
+            "发布(到|至|上)|推(送)?到|上线|导出.{0,4}(数据|客户|用户)|"
+            "npm|pypi|npmjs|github release|生产(环境|库|服务器)",
             "生产环境|线上环境|主分支|改数据库|重启服务",
             # Money, credentials, destructive actions and external sending are
             # all user-only. The English list has to be as wide as the Chinese
@@ -110,8 +112,17 @@ DEFAULTS: dict = {
             # through a payment, a deletion or a send.
             r"\b(paid|paying|prepay|subscription|upgrade to (pro|paid|premium))\b|"
             r"\b(cost|costs|charge|charges|spend|spent|price|priced|budget|fee|fees)\b|"
-            r"\b(pay|paid|paying|payment|purchase|buy|renew|refund|invoice|billing|"
-            r"wire|transfer|remit|hire|contract|quote)\b|"
+            # Money verbs need a money object. A bare `pay`/`buy`/`transfer`
+            # blocked ordinary work ("pay attention to the lint warnings",
+            # "transfer the helper into its own module") — 47% of realistic
+            # endings lost their nudge to this.
+            r"\b(payment|purchase|renew|refund|invoice|billing|subscription|paid)\b|"
+            r"\bpay(?:ing)?\b(?!\s+attention)\s*(?:for\b|the\b|\$|\d|him|her|them|it\b)|"
+            r"\bbuy\s+(?:the|a|an|this|that|it|them|more|\$|\d)\b|"
+            r"\b(?:wire|transfer|remit)\s+(?:the\s+|my\s+|our\s+)?(?:money|funds|amount|payment|\$|\d)|"
+            r"\bhire\s+(?:a\s+|an\s+|the\s+)?(?:contractor|freelancer|developer|dev|person|someone|agency|consultant)\b|"
+            r"\bsign\s+(?:the\s+)?(?:contract|agreement|deal|nda|quote)\b|"
+            r"\bget(?:ting)?\s+a\s+quote\b|"
             r"[$€£¥]\s*\d|\d\s*(usd|eur|cny|rmb|dollars?)\b|"
             r"\b(api key|api keys|secret|secrets|credential|credentials|token|"
             r"access key|private key|ssh key|passphrase|password|2fa|otp|verification code)\b|"
@@ -386,7 +397,13 @@ def log_event(
         record = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), **event}
         if not snippet:
             record.pop("snippet", None)
+        created_dir = not events_path.parent.exists()
         events_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if created_dir:
+            try:
+                events_path.parent.chmod(0o700)
+            except OSError:
+                pass
         with open(events_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         try:
@@ -485,6 +502,23 @@ def decide(
     ``stop_hook_active``). Hosts that do not report it can leave it ``False``:
     the chain is tracked in the state file either way.
     """
+    # The documented kill switch, in one place so that every caller (plugin,
+    # shell adapters, patch mode) honours it. The plugin mode used to ignore it.
+    if os.environ.get("HERMES_CONTINUE_HOOK") == "0":
+        log_event(
+            {
+                "session": session_id,
+                "host": host,
+                "platform": platform,
+                "decision": "skip",
+                "reason": "disabled_env",
+                "attempt": 0,
+                "snippet": "",
+            },
+            events_path,
+        )
+        return Decision(should_nudge=False, reason="disabled_env", attempt=0)
+
     cfg = load_config(config_path)
     # The config may redirect the log (a private directory, a read-only home).
     if events_path is None and isinstance(cfg.get("events_path"), str) and cfg["events_path"].strip():
@@ -521,16 +555,23 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
     total = int(_num(entry.get("total", 0), 0, integer=True))
     snippet = (text or "")[-160:]
 
+    # Reasons that mean "this turn really ended" — the next user turn starts
+    # from zero. Everything else (a cap, a cooldown, an empty reply) must keep
+    # the chain open: resetting there let 8 identical stop events produce 6
+    # nudges with max_nudges_per_turn: 2.
+    closing_reasons = {"no_trigger", "boundary", "user_must"}
+
     def finish(nudge: bool, reason: str) -> Decision:
         if nudge:
             entry["count"] = attempt + 1
             entry["total"] = total + 1
             entry["last_ts"] = now
             entry["chain"] = True
-        else:
+        elif reason in closing_reasons:
             # The turn ended without a nudge — close the chain.
             entry["count"] = 0
             entry["chain"] = False
+        # else: leave the chain (and the per-turn counter) exactly as it was.
         state["version"] = STATE_VERSION
         write_state(state, state_path)
         log_event(
@@ -593,7 +634,7 @@ def continue_hook_enabled() -> bool:
         # Nothing configured (a fresh install, a test, a bare import): the gate
         # stays off rather than guessing. HERMES_CONTINUE_HOOK=1 is the
         # explicit opt-in; HERMES_CONTINUE_HOOK=0 is the kill switch below.
-        return _os.environ.get("HERMES_CONTINUE_HOOK") == "1"
+        return os.environ.get("HERMES_CONTINUE_HOOK") == "1"
     return bool(switch)
 
 def continue_hook_nudge(agent, final_response) -> str | None:
@@ -603,7 +644,7 @@ def continue_hook_nudge(agent, final_response) -> str | None:
     turn end. Every failure is silent: a broken gate must not break the loop.
     """
     try:
-        if _os.environ.get("HERMES_CONTINUE_HOOK") == "0":
+        if os.environ.get("HERMES_CONTINUE_HOOK") == "0":
             return None
         if not continue_hook_enabled():
             return None

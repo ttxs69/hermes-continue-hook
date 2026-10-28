@@ -136,9 +136,14 @@ export const ContinueHookPlugin = async ({ client }) => {
     event: async ({ event }) => {
       if (!event || event.type !== "session.idle") return;
       try {
-        await handleIdle(client, event, state);
-      } catch {
-        /* fail open: never break the host */
+        const result = await handleIdle(client, event);
+        // Fail open, but not silently: a crash here used to be invisible and
+        // the host simply never fired.
+        if (!result?.nudged && result?.reason && result.reason.startsWith("adapter_error")) {
+          console.error(`continue-hook: ${result.reason}`);
+        }
+      } catch (err) {
+        console.error(`continue-hook: adapter error: ${err && err.message ? err.message : err}`);
       }
     },
   };

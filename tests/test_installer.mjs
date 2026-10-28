@@ -320,6 +320,84 @@ await test("the hook command survives a home directory with a space", () => {
   assert.ok(out.includes("decision"), "the installed hook did not run");
 });
 
+await test("check is read-only: it never writes a backup or fails on JSONC", () => {
+  const home = freshHome();
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  writeFileSync(path.join(home, ".claude", "settings.json"), '{\n  // mine\n  "model": "opus"\n}\n');
+  const res = runCli(["check", "--host", "claude-code"], home);
+  const files = readdirSync(path.join(home, ".claude"));
+  assert.deepStrictEqual(files, ["settings.json"], "check wrote something");
+  assert.notStrictEqual(res.code, 3, "check must not abort on an unparsable file");
+});
+
+await test("uninstall on a clean machine creates nothing", () => {
+  const home = freshHome();
+  const res = runCli(["uninstall", "--host", "all"], home);
+  const created = readdirSync(home, { withFileTypes: true }).map((e) => e.name);
+  assert.deepStrictEqual(created, [], `uninstall created: ${created.join(", ")}`);
+  assert.strictEqual(res.code, 0, res.out);
+});
+
+await test("a UTF-8 BOM does not make the config uninstallable", () => {
+  // Notepad and several Windows tools write a BOM; JSON.parse rejects it and
+  // install then failed forever with a message blaming a trailing comma.
+  const home = freshHome();
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  writeFileSync(path.join(home, ".claude", "settings.json"), '\ufeff{"model": "opus"}\n');
+  const res = runCli(["install", "--host", "claude-code"], home);
+  assert.strictEqual(res.code, 0, res.out);
+  assert.strictEqual(JSON.parse(readFileSync(path.join(home, ".claude", "settings.json"), "utf8")).model, "opus");
+});
+
+await test("a host is detected by its own directory, not by our file", () => {
+  // Detection used to look for the artefact we install, which cannot exist
+  // before the first install — so "--host all" refused on a machine that had
+  // the host but not our hook.
+  const home = freshHome();
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  const res = runCli(["install", "--host", "all"], home);
+  assert.strictEqual(res.code, 0, res.out);
+  assert.ok(existsSync(path.join(home, ".claude", "settings.json")));
+  assert.ok(!existsSync(path.join(home, ".cursor")), "a cursor directory was invented");
+});
+
+await test("a user's own extension is backed up, never silently replaced or deleted", () => {
+  const home = freshHome();
+  const ext = path.join(home, ".pi", "agent", "extensions", "continue-hook.ts");
+  mkdirSync(path.dirname(ext), { recursive: true });
+  const mine = "// my own extension\nexport default function mine(pi) {}\n";
+  writeFileSync(ext, mine);
+
+  const before = runCli(["check", "--host", "pi"], home);
+  assert.match(before.out, /✗/, "a user file must not be reported as our install");
+
+  runCli(["install", "--host", "pi"], home);
+  const backups = readdirSync(path.dirname(ext)).filter((f) => f.includes(".bak-"));
+  assert.strictEqual(backups.length, 1, "the user's file was replaced without a backup");
+
+  runCli(["uninstall", "--host", "pi"], home);
+  assert.ok(backups.length >= 1);
+});
+
+await test("uninstall leaves a user file it did not write", () => {
+  const home = freshHome();
+  const ext = path.join(home, ".pi", "agent", "extensions", "continue-hook.ts");
+  mkdirSync(path.dirname(ext), { recursive: true });
+  writeFileSync(ext, "// hand written by the user\n");
+  const res = runCli(["uninstall", "--host", "pi"], home);
+  assert.strictEqual(res.code, 0, res.out);
+  assert.ok(existsSync(ext), "uninstall deleted a file it did not write");
+});
+
+await test("--dry-run writes nothing at all, not even a backup", () => {
+  const home = freshHome();
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  writeFileSync(path.join(home, ".claude", "settings.json"), '{\n  // mine\n}\n');
+  const res = runCli(["install", "--host", "claude-code", "--dry-run"], home);
+  assert.notStrictEqual(res.code, 0, "a run that would fail should fail in dry-run too");
+  assert.deepStrictEqual(readdirSync(path.join(home, ".claude")), ["settings.json"]);
+});
+
 await test("check reports what is installed", () => {
   const home = freshHome();
   runCli(["install", "--host", "claude-code"], home);
