@@ -39,9 +39,6 @@ function findHookctl() {
 }
 
 const HOOKCTL = findHookctl();
-const CONFIG_PATH = path.join(homedir(), ".hermes", "continue_hook.json");
-const STATE_PATH = path.join(homedir(), ".hermes", "continue-hook-state.json");
-const EVENTS_PATH = path.join(homedir(), ".hermes", "continue-hook-events.jsonl");
 
 const NUDGE =
   "【continue-hook】Your last reply ended by asking the user a question.\n" +
@@ -82,8 +79,8 @@ function shouldNudge(text, sessionId) {
   if (!HOOKCTL || !text || !text.trim()) return { nudge: false, reason: "no_hookctl" };
   const res = spawnSync(
     "python3",
-    [HOOKCTL, "--text", text, "--session", sessionId, "--host", "opencode", "--nudge-text"],
-    { encoding: "utf8", timeout: 10000 },
+    [HOOKCTL, "--text", "-", "--session", sessionId, "--host", "opencode", "--nudge-text"],
+    { encoding: "utf8", timeout: 10000, input: text },
   );
   if (res.status !== 0) return { nudge: false, reason: "hookctl_failed" };
   try {
@@ -110,31 +107,6 @@ export function lastAssistantText(messages) {
     if (text) return text;
   }
   return "";
-}
-
-function bumpCounter(sessionId) {
-  const state = readJson(STATE_PATH, {});
-  const entry = state[sessionId] || { count: 0, last_ts: 0 };
-  const now = Date.now() / 1000;
-  const cfg = readJson(CONFIG_PATH, {});
-  const cooldown = Number(cfg.cooldown_seconds ?? 300);
-  if (now - (entry.last_ts || 0) < cooldown) {
-    return { allowed: false, attempt: entry.count || 0, reason: "cooldown" };
-  }
-  const attempt = Number(entry.count || 0);
-  const max = Number(cfg.max_nudges_per_turn ?? 2);
-  if (attempt >= max) {
-    return { allowed: false, attempt, reason: "max_nudges" };
-  }
-  entry.count = attempt + 1;
-  entry.last_ts = now;
-  state[sessionId] = entry;
-  try {
-    writeFileSync(STATE_PATH, JSON.stringify(state));
-  } catch {
-    /* ignore */
-  }
-  return { allowed: true, attempt, reason: "ok" };
 }
 
 /** Send the nudge back into the session (v2 client first, v1 as fallback). */

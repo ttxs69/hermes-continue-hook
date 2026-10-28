@@ -42,6 +42,10 @@ execFileSync(
 const SRC = path.join(WORK, "src");
 mkdirSync(SRC, { recursive: true });
 cpSync(PLUGIN_SRC, path.join(SRC, "index.ts"));
+// The plugin shells out to the shared decision service — without it in the
+// fixture the test passes while the plugin would do nothing in production.
+cpSync(path.join(REPO, "hookctl.py"), path.join(WORK, "hookctl.py"));
+cpSync(path.join(REPO, "detector.py"), path.join(WORK, "detector.py"));
 writeFileSync(
   path.join(WORK, "package.json"),
   JSON.stringify({ name: "ch-dsh-test", type: "module", private: true }, null, 2),
@@ -162,11 +166,13 @@ await test("dry_run never steers", () => {
   if (steered.length !== 0) throw new Error(`expected 0 steers, got ${steered.length}`);
 });
 
-await test("a missing detector fails open", () => {
-  const detector = path.join(HOME, ".hermes", "continue-hook", "detector.py");
+await test("a broken detector fails open", () => {
+  // The plugin calls hookctl.py, which imports the detector sitting next to
+  // it — so that is the file to break (breaking the copy in HOME would not
+  // be exercised at all).
+  const detector = path.join(WORK, "detector.py");
   const backup = `${detector}.bak`;
   cpSync(detector, backup);
-  // point the plugin at a detector that always fails
   writeFileSync(detector, "import sys\nsys.exit(3)\n");
   const steered = runTurn("要不要我继续？", { sessionId: "s6" });
   cpSync(backup, detector);

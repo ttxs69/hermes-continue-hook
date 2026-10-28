@@ -124,8 +124,10 @@ function shouldNudge(text: string, sessionId: string): { nudge: boolean; reason:
   if (!HOOKCTL || !text.trim()) return { nudge: false, reason: 'no_hookctl' }
   const result = spawnSync(
     'python3',
-    [HOOKCTL, '--text', text, '--session', sessionId, '--host', 'dsh', '--nudge-text'],
-    { encoding: 'utf8', timeout: 10000 },
+    [HOOKCTL, '--text', '-', '--session', sessionId, '--host', 'dsh', '--nudge-text'],
+    // The reply goes in over stdin, not argv: a command-line argument is
+    // visible to every process on the machine.
+    { encoding: 'utf8', timeout: 10000, input: text },
   )
   if (result.status !== 0) return { nudge: false, reason: 'hookctl_failed' }
   try {

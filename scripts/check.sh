@@ -10,6 +10,9 @@ ${RUFF:-ruff} check .
 echo "== mypy"
 ${MYPY:-mypy}
 
+echo "== patch-mode is in step with the engine"
+python3 scripts/build-patch-mode.py --check
+
 echo "== python tests"
 python3 -m unittest discover -s tests
 

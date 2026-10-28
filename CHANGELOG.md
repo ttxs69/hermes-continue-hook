@@ -2,6 +2,30 @@
 
 ## 1.3.0 (2026-10-28)
 
+- **Fixed: installing the Cursor/Copilot hook deleted the user's own hooks.**
+  Cursor entries are `{command}`, Copilot entries are `{type, bash}` — neither
+  carries a `hooks` array, and the cleaner assumed every entry had one. Flat
+  entries are now preserved unless they are ours.
+- **Fixed: the state file had no lock.** Eight hooks firing at once left only
+  three of eight session counters on disk — a lost update that can let the
+  nudge caps be exceeded. The read-modify-write now happens under an advisory
+  lock; the same test now keeps 8/8.
+- **Fixed: the JS/TS adapters passed the reply as a command-line argument**,
+  which puts the user's conversation in `/proc/<pid>/cmdline` (readable by
+  every process on the machine) and breaks on very long replies. The text now
+  goes over stdin (`hookctl.py --text -`).
+- **Fixed: a question mark inside code was a question.** Ternaries and
+  optional chaining in a code block or inline code no longer trigger.
+- **Fixed: the English exclusion list was thinner than the Chinese one** —
+  an English agent could talk itself into a payment, a deletion or a publish.
+- **Patch mode is generated now.** `patch-mode/continue_hook.py` was a second,
+  hand-maintained copy of the detector with its own patterns, its own key
+  names and a hardcoded `~/moneymaker/state/…` log path. It is generated from
+  the shared engine by `scripts/build-patch-mode.py`, and the build fails
+  when the generated file is stale.
+- The DeepSeek Harness test now installs the shared decision service into
+  its fixture — it used to pass while the plugin would have done nothing.
+
 - **Fixed (release blocker): the Hermes plugin never fired.** Hermes calls
   lifecycle hooks with keyword arguments only (`response_text=…`), and the
   plugin's observer took a required positional `text` — so every call raised

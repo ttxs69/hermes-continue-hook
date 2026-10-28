@@ -231,6 +231,19 @@ printf '%s' '{"session_id":"t","stop_hook_active":false,"last_assistant_message"
 The same payload shape works for Codex and Qwen (`last_assistant_message`);
 Cursor needs `transcript_path` instead; Gemini needs `prompt_response`.
 
+### Patch mode is version-pinned — read this before using it
+
+Patch mode modifies the **Hermes core source tree**. That makes it the least
+maintainable mode: the patch is written against one Hermes version, and it
+**refuses to install** when the target does not match (`git apply --check`
+fails, or the version guard does not find the stop-gate chain). A refused
+install is the intended behaviour, not a bug — use plugin mode instead.
+
+The file it drops in (`patch-mode/continue_hook.py`) is **generated** from the
+shared engine by `scripts/build-patch-mode.py`, so it can never become a
+second, drifting implementation of the rules. The build fails when it is out
+of date.
+
 ## Docs
 
 * [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the layers fit, and why
@@ -256,7 +269,7 @@ everything else runs offline.
 | Mode | Same-turn seamless | Zero core change | Install |
 |---|---|---|---|
 | **Plugin (default)** | ✗ (follow-up turn, full context) | ✅ | `hermes plugins install` |
-| **Patch mode** — 4-line core stop gate, version-guarded, `--remove` reverts | ✅ | ✗ | `patch-mode/install.sh <hermes-agent-path>` |
+| **Patch mode** — a core stop gate; version-pinned, see the caveat below | ✅ | ✗ | `patch-mode/install.sh <hermes-agent-path>` |
 | **Preventive layer** — standing reminder appended to user messages (optional `hooks.pre_llm_call`) | prevention | ✅ | copy `agent-hooks/ch_preventive.sh` into `~/.hermes/agent-hooks/` and register it |
 | Upstream PR (make `pre_verify` fire on all text stops) | ✅ | ✅ after merge | roadmap |
 

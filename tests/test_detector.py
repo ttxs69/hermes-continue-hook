@@ -162,5 +162,36 @@ class TestNudge(unittest.TestCase):
         self.assertTrue(should)
         self.assertTrue(reason.startswith("trigger:"))
 
+
+    def test_a_question_mark_in_code_is_not_a_question(self):
+        """Ternaries and optional chaining are syntax, not questions."""
+        cfg = default_config()
+        for text in (
+            "改好了：\n```js\nconst x = a ? b : c;\n```",
+            "改成 `x ? y : z` 就行",
+        ):
+            should, reason = detect(text, 0, cfg)
+            self.assertFalse(should, f"{text!r} should not trigger ({reason})")
+
+    def test_english_boundaries_are_excluded(self):
+        """The English exclusion list has to cover the same boundaries as the
+        Chinese one — otherwise an English agent can talk itself into a
+        payment, a deletion or a publish."""
+        cfg = default_config()
+        for text in (
+            "This will cost $120 — I need your approval first.",
+            "I need your API key to continue.",
+            "Should I delete the branch and the old files?",
+            "Should I publish this to main?",
+        ):
+            should, reason = detect(text, 0, cfg)
+            self.assertFalse(should, f"{text!r} should not trigger ({reason})")
+
+    def test_english_permission_seeking_still_triggers(self):
+        cfg = default_config()
+        should, reason = detect("Should I also update the README?", 0, cfg)
+        self.assertTrue(should)
+        self.assertTrue(reason.startswith("trigger:"))
+
 if __name__ == "__main__":
     unittest.main()

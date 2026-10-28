@@ -29,6 +29,9 @@ _QUOTE_RE = re.compile(
 # permission-seeking ending.
 _URL_RE = re.compile(r"https?://[^\s<>）)\]\"']+")
 _MARKDOWN_LINK_RE = re.compile(r"\]\([^)]*\)")
+# A "?" inside a code block or inline code is syntax, not a question.
+_CODE_BLOCK_RE = re.compile(r"```.*?```", re.S)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]{1,120}`")
 
 NUDGE_TEMPLATE = (
     "【continue-hook】Your last reply ended by asking the user a question.\n"
@@ -90,8 +93,13 @@ DEFAULTS: dict = {
         "boundary": [
             "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销",
             "对外发布|发布出去|删掉|删除数据|授权",
-            r"(cost|charge|pay(ing)?|purchase|renew)\s*\$?\d|(do you )?approve|approval|"
-            r"\bpassword\b|2fa|otp code|delete (the|all) (data|files)|publish (it|this)",
+            r"(cost|charge|costs|charges|spend|spent|price|priced|budget)\s*\$?\d|"
+            r"\$\s*\d|€\s*\d|£\s*\d|¥\s*\d|"
+            r"(do you )?approve|approval|\bapprove\b|sign(ing)? (in|up) as you|"
+            r"your (credentials|api key|credit card|password)|\bpassword\b|2fa|otp code|"
+            r"delete (the|all|my)? ?(data|files|branch|repo|database)|"
+            r"publish (it|this|the)|push (it|this|the) to (main|master|prod|production)|"
+            r"deploy (it|this|the) to prod|merge (the|this) pr|send (the|this) email to",
         ],
         # Second-person requests: only the user can provide / decide this.
         "user_must": [
@@ -165,6 +173,8 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     # trigger: a "?" inside a link is not a question.
     no_urls = _MARKDOWN_LINK_RE.sub(" ", trig_tail)
     no_urls = _URL_RE.sub(" ", no_urls)
+    no_urls = _CODE_BLOCK_RE.sub(" ", no_urls)
+    no_urls = _INLINE_CODE_RE.sub(" ", no_urls)
     for name in ("offer", "hand_off", "confirm_seek"):
         if _compile(tr.get(name)).search(trig_tail):
             return True, f"trigger:{name}"

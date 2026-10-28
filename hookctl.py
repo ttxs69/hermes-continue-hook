@@ -144,6 +144,51 @@ def write_state(state: dict[str, Any], path: Path | str | None = None) -> None:
         pass
 
 
+class _StateLock:
+    """An advisory lock around the state file.
+
+    Several hosts can fire hooks at the same moment (a user with two agents
+    open, or two hosts in parallel). Without a lock the read-modify-write
+    loses updates: the counters for one session overwrite another's, and the
+    nudge caps stop holding.
+
+    The lock is a separate ``.lock`` file, so the state file itself is never
+    truncated while another process holds it. If locking is unavailable
+    (Windows, exotic filesystems), the code still works — it just loses the
+    guarantee.
+    """
+
+    def __init__(self, state_path: Path):
+        self.path = Path(str(state_path) + ".lock")
+        self._handle: Any = None
+
+    def __enter__(self) -> _StateLock:
+        try:
+            import fcntl
+
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._handle = open(self.path, "a+")
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX)
+        except Exception:
+            self._handle = None
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._handle is None:
+            return
+        try:
+            import fcntl
+
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        try:
+            self._handle.close()
+        except Exception:
+            pass
+        self._handle = None
+
+
 def log_event(event: dict[str, Any], path: Path | str | None = None) -> None:
     """Append one evaluation record. Never raises."""
     events_path = Path(path) if path else default_events_path()
@@ -184,6 +229,26 @@ def decide(
     the chain is tracked in the state file either way.
     """
     cfg = load_config(config_path)
+    # The whole read-modify-write happens under the lock: two hooks firing at
+    # once must not overwrite each other's counters.
+    state_path = Path(state_path) if state_path else default_state_path()
+    with _StateLock(state_path):
+        return _decide_locked(
+            text,
+            session_id=session_id,
+            host=host,
+            cfg=cfg,
+            state_path=state_path,
+            events_path=events_path,
+            continued=continued,
+            platform=platform,
+        )
+
+
+def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any],
+                   state_path: Path, events_path: Path | str | None,
+                   continued: bool, platform: str) -> Decision:
+    """The decision itself. Callers hold the state lock."""
     state = read_state(state_path)
     entry = _session_entry(state, session_id)
 
@@ -258,7 +323,9 @@ def _cli(argv: Iterable[str]) -> int:
     break the host that asked.
     """
     parser = argparse.ArgumentParser(description="continue-hook decision service")
-    parser.add_argument("--text", default="")
+    parser.add_argument("--text", default="",
+                        help="the reply text; use '-' to read it from stdin "
+                             "(keeps the conversation out of the process list)")
     parser.add_argument("--session", default="default")
     parser.add_argument("--host", default="unknown")
     parser.add_argument("--platform", default="")
@@ -271,9 +338,19 @@ def _cli(argv: Iterable[str]) -> int:
                         help="also print the nudge text to inject")
     args = parser.parse_args(list(argv))
 
+    text = args.text
+    if text == "-":
+        # Read the reply from stdin: a command-line argument is visible to
+        # every process on the machine (/proc/<pid>/cmdline), and the reply is
+        # the user's own conversation.
+        try:
+            text = sys.stdin.read()
+        except Exception:
+            text = ""
+
     try:
         decision = decide(
-            args.text,
+            text,
             session_id=args.session,
             host=args.host,
             config_path=args.config,
