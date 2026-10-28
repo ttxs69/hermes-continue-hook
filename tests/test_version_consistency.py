@@ -160,6 +160,43 @@ class TestToolchainIsPinned(unittest.TestCase):
             )
 
 
+class TestTheVersionBumpKeepsTheFormatting(unittest.TestCase):
+    """`npm version` must not leave the tree failing the gate.
+
+    The version hook rewrote the plugin manifests with `JSON.stringify`,
+    which puts every array element on its own line. Prettier collapses a
+    short array onto one line, so the bump produced files that
+    `prettier --check` rejected — and the release gate runs that check, so
+    the release failed on its own version bump.
+    """
+
+    def test_the_manifests_are_prettier_clean(self) -> None:
+        import subprocess
+
+        prettier = REPO / "node_modules" / ".bin" / "prettier"
+        if not prettier.exists():
+            self.skipTest("prettier is not installed")
+        manifests = sorted(
+            str(p.relative_to(REPO))
+            for p in REPO.rglob("*.json")
+            if "node_modules" not in p.parts
+            and "__pycache__" not in p.parts
+            and ".venv" not in p.parts
+            and p.name != "package-lock.json"
+        )
+        result = subprocess.run(
+            [str(prettier), "--check", *manifests],
+            capture_output=True,
+            text=True,
+            cwd=REPO,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            "these manifests are not prettier-clean:\n" + result.stdout,
+        )
+
+
 class TestProjectHygiene(unittest.TestCase):
     """A published package must not carry local paths or credentials."""
 
