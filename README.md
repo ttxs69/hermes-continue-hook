@@ -416,9 +416,18 @@ without the text, or point `"events_path"` at a directory you control.
 ## Development
 
 ```bash
-./scripts/check.sh        # everything CI runs, one command
 npm install               # dev tooling: eslint, prettier, tsc, vitest, typescript-eslint
+./scripts/check.sh        # everything CI runs, one command
 ```
+
+`npm install` also installs two git hooks (husky): a `pre-commit` that runs
+the fast checks on the files you staged (~2 s), and a `pre-push` that runs
+the whole gate (~60 s) — so a mismatch with CI shows up before the push
+rather than after it. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Use the node version in `.nvmrc` (`nvm use`); the gate and the hooks both
+refuse to run on a different one, because a check that runs on a different
+node than CI does not predict CI.
 
 ### Quality gates
 
@@ -433,7 +442,7 @@ binaries; the point of the table is that no row is missing.
 | **Format** | ruff `format` | **prettier** | `pyproject.toml`, `.prettierrc.json` | every push |
 | **Types** | **mypy** | **tsc** — `strict` for the TS sources, `checkJs` for the JS ones | `pyproject.toml`, `tsconfig.json`, `tsconfig.checkjs.json` | every push |
 | **Tests** | **pytest** | **vitest** | `pyproject.toml`, `vitest.config.mjs` | every push |
-| **Coverage floor** | pytest-cov (`fail_under = 78`) | vitest v8 (`lines 80`) | same files | every push |
+| **Coverage floor** | pytest-cov (`fail_under = 80`) | vitest v8 (`lines 80`) | same files | every push |
 | **Zero-dependency run** | stdlib `unittest` | — | — | 3.10–3.13 |
 
 **The complexity ceilings are not decoration.** Before the gate existed, the

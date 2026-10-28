@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 # pre-commit — the fast gate, on the files you are committing.
 #
-# Why a separate pre-push hook: the full gate takes ~60 seconds (it runs the
-# whole Python and JavaScript suites). That is fine before a push and not
+# Why a separate pre-push hook: the whole gate takes ~60 seconds (it runs the
+# entire Python and JavaScript suites). That is fine before a push and not
 # fine before every commit. This hook runs the checks that are cheap enough
 # to run every time, and only on the files that changed.
 #
@@ -18,7 +18,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 # The toolchain must be the one the workflows use — same rule as
-# scripts/check.sh, and the reason it is checked here first: a commit made
+# the full gate does, and the reason it is checked here first: a commit made
 # with the wrong node produces a different result than the same commit in CI.
 PINNED_MAJOR="$(cat .nvmrc 2>/dev/null | cut -d. -f1)"
 if [ -n "${PINNED_MAJOR}" ]; then
