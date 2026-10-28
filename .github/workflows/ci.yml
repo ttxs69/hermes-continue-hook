@@ -76,8 +76,13 @@ jobs:
       # must be enough to load and run the installer.
       - name: --help parses
         run: node bin/continue-hook.js --help
-      - name: check reports a clean machine
-        run: node bin/continue-hook.js check --json
+      - name: check --json is valid JSON
+        run: |
+          set +e
+          node bin/continue-hook.js check --json > /tmp/check.json
+          # exit 1 means "not installed anywhere", which is correct on a clean
+          # runner; what this job proves is that node 18 can run the CLI at all.
+          node -e 'const s=require("fs").readFileSync("/tmp/check.json","utf8"); const v=JSON.parse(s); if(!Array.isArray(v)) process.exit(1)'
       - name: install then uninstall in a throwaway HOME
         run: |
           export HOME=$(mktemp -d)
@@ -93,7 +98,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -131,7 +135,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
       - name: Install dev tooling
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Vitest (OpenCode plugin, installer, lifecycle invariants)
@@ -148,7 +151,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
