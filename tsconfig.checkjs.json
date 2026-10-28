@@ -16,6 +16,6 @@
     "useUnknownInCatchVariables": true,
     "types": ["node"]
   },
-  "include": ["bin/**/*.js", "adapters/opencode/**/*.js", "scripts/**/*.mjs"],
+  "include": ["bin/**/*.js", "adapters/opencode/**/*.js", "scripts/**/*.mjs", "vitest.config.mjs"],
   "exclude": ["node_modules", "adapters/dsh", "tests"]
 }

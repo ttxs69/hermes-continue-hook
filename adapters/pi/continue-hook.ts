@@ -106,7 +106,7 @@ function shouldNudge(
 }
 
 export default function continueHookPiExtension(pi: any) {
-  pi.on("agent_before_settle", async (event: any) => {
+  pi.on("agent_before_settle", (event: any) => {
     try {
       const messages: any[] = event?.messages ?? event?.entries ?? [];
       const text = lastAssistantText(messages);

@@ -136,7 +136,7 @@ export async function handleIdle(client, event) {
   return { nudged: sent, reason: sent ? "nudged" : "prompt_failed" };
 }
 
-export const ContinueHookPlugin = async ({ client }) => {
+export const ContinueHookPlugin = ({ client }) => {
   return {
     event: async ({ event }) => {
       if (!event || event.type !== "session.idle") return;
