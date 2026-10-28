@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 (2026-10-28)
+
+- **The npm release now runs without a stored secret.** The publish workflow
+  authenticates with the CI provider's OIDC identity (npm trusted publishing),
+  so the repository holds no npm token. The package's provenance attestation
+  is attached automatically.
+
 ## 1.3.0 (2026-10-28)
 
 - **Published to npm as `@ttxs69/hermes-continue-hook`**, with a SLSA v1

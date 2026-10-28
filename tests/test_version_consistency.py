@@ -55,6 +55,39 @@ class TestVersionConsistency(unittest.TestCase):
         data = json.loads(_read(path))
         self.assertEqual(data["version"], self.version)
 
+    def test_every_manifest_with_a_version_matches(self):
+        """Any manifest carrying a version must carry *this* version.
+
+        The four checked by name above used to be the whole list, and seven
+        more manifests drifted out of step without the suite noticing: the
+        per-harness plugin manifests (Claude Code, Codex, Cursor, Kimi,
+        Devin, Antigravity) and the Gemini extension file. They are found
+        here by walking the tree instead of by being listed, so a new
+        manifest is covered the moment it is added.
+        """
+        offenders = []
+        checked = 0
+        for path in sorted(REPO.rglob("*.json")):
+            if "node_modules" in path.parts or "__pycache__" in path.parts:
+                continue
+            if path.name in {"package-lock.json", "pack.json"}:
+                continue
+            try:
+                data = json.loads(_read(path))
+            except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            version = data.get("version")
+            if not isinstance(version, str) or not re.match(r"^\d+\.\d+\.\d+$", version):
+                continue
+            checked += 1
+            if version != self.version:
+                offenders.append(f"{path.relative_to(REPO)} says {version}")
+        # The npm package itself is one of them.
+        self.assertGreaterEqual(checked, 8, "the manifest walk found suspiciously few files")
+        self.assertEqual(offenders, [], f"version drift: {offenders}")
+
     def test_changelog_mentions_the_current_version(self):
         text = _read(REPO / "CHANGELOG.md")
         self.assertIn(self.version, text)
