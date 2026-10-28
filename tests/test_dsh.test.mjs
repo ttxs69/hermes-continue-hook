@@ -121,11 +121,18 @@ writeFileSync(
   ),
 );
 console.log("compiling the plugin …");
-// Report what the install actually produced, so a failure here says which
-// piece is missing rather than only that some piece is.
-const TSC = path.join(WORK, "node_modules", ".bin", "tsc");
-if (!existsSync(TSC)) {
-  console.error("continue-hook dsh test: no tsc at", TSC);
+// Call typescript through node, not through `node_modules/.bin/tsc`.
+//
+// The `.bin` shim is created by npm's bin-linking step, and that step does
+// not reliably run for every npm version in every environment — the release
+// workflow deliberately upgrades npm mid-job, and there the shim was missing
+// while the package itself had been installed correctly (the log said
+// "added 17 packages"). Going through the package's own entry point skips
+// the shim entirely: `node node_modules/typescript/bin/tsc` is the same
+// program the shim would have run.
+const TSC_JS = path.join(WORK, "node_modules", "typescript", "bin", "tsc");
+if (!existsSync(TSC_JS)) {
+  console.error("continue-hook dsh test: typescript is not installed at", TSC_JS);
   console.error("  node_modules present:", existsSync(path.join(WORK, "node_modules")));
   if (existsSync(path.join(WORK, "node_modules"))) {
     console.error(
@@ -134,8 +141,9 @@ if (!existsSync(TSC)) {
     );
   }
   console.error("  npm on PATH:", execFileSync("which", ["npm"], { encoding: "utf8" }).trim());
+  process.exit(1);
 }
-execFileSync(TSC, ["-p", "tsconfig.json"], {
+execFileSync("node", [TSC_JS, "-p", "tsconfig.json"], {
   cwd: WORK,
   stdio: "inherit",
 });
