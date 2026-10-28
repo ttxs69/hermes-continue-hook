@@ -10,7 +10,9 @@ Runs via `python tests/test_register.py` or `python -m unittest discover -s test
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import pathlib
 import sys
 import tempfile
 import unittest
@@ -30,6 +32,8 @@ class MockCtx:
         self.hooks = {}
         self.commands = {}
         self.injected = []
+        self.rejected = []
+        self.mode = "cli"
 
     def register_hook(self, event, cb):
         self.hooks[event] = cb
@@ -38,7 +42,33 @@ class MockCtx:
         self.commands[name] = handler
 
     def inject_message(self, content, role="user", **kw):
+        """Mirror hermes_cli/plugins_injection.py, including its refusals.
+
+        The old mock accepted anything, which is how "gateway injection needs
+        a session_key or an origin" stayed invisible for four rounds.
+        """
+        key = kw.get("session_key")
+        origin = kw.get("origin")
+        if self.mode == "cli":
+            if origin is not None:
+                self.rejected.append("cli must not receive an origin")
+                return False
+            self.injected.append({"content": content, "role": role, **kw})
+            return True
+        if key and origin is not None:
+            self.rejected.append("session_key and origin are exclusive")
+            return False
+        if not key and origin is None:
+            self.rejected.append("gateway requires session_key or origin")
+            return False
+        if origin is not None and not isinstance(origin, dict):
+            self.rejected.append("origin must be a mapping")
+            return False
+        if key is not None and ":" not in str(key):
+            self.rejected.append("gateway session_key must be composite")
+            return False
         self.injected.append({"content": content, "role": role, **kw})
+        return True
 
 
 class TestRegister(unittest.TestCase):
@@ -76,16 +106,45 @@ class TestRegister(unittest.TestCase):
         self.ctx.hooks["transform_llm_output"](
             response_text="要不要我继续拆解下一条？", session_id="s1",
             model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s1", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s1")
         self.assertEqual(len(self.ctx.injected), 1)
         self.assertEqual(self.ctx.injected[0]["role"], "user")
         self.assertIn("continue-hook", self.ctx.injected[0]["content"])
+
+    def test_a_gateway_session_is_not_told_it_was_delivered(self):
+        """`on_session_end` carries no session_key and no origin.
+
+        A messaging gateway therefore needs something we cannot supply, and the
+        honest outcome is a recorded "unsupported", not a cheerful nudge record
+        for a message nobody received.
+        """
+        self.ctx.mode = "gateway"
+        self.ctx.hooks["transform_llm_output"](
+            response_text="要不要我继续拆解下一条？", session_id="g1", model="m", platform="cli")
+        self.ctx.hooks["on_session_end"](platform="qqbot", session_id="g1", completed=True)
+        self.assertEqual(self.ctx.injected, [], "nothing may be injected without a key")
+        events = pathlib.Path(os.environ["HOME"]) / ".hermes" / "continue-hook-events.jsonl"
+        decisions = [json.loads(line) for line in events.read_text().splitlines() if line.strip()]
+        self.assertTrue(
+            any(d.get("decision") == "inject_unsupported_gateway" for d in decisions),
+            decisions,
+        )
+
+    def test_a_durable_session_key_is_used_when_the_host_provides_one(self):
+        self.ctx.mode = "gateway"
+        self.ctx.hooks["transform_llm_output"](
+            response_text="要不要我继续拆解下一条？", session_id="g2", model="m", platform="cli")
+        self.ctx.hooks["on_session_end"](
+            platform="qqbot", session_id="g2", completed=True,
+            session_key="agent:main:qqbot:chat:42")
+        self.assertEqual(len(self.ctx.injected), 1)
+        self.assertEqual(self.ctx.injected[0]["session_key"], "agent:main:qqbot:chat:42")
 
     def test_turn_end_declarative_no_inject(self):
         self.ctx.hooks["transform_llm_output"](
             response_text="已完成，验证通过。", session_id="s2",
             model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s2", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s2")
         self.assertEqual(self.ctx.injected, [])
 
     def test_interrupted_turn_skips(self):
@@ -106,20 +165,20 @@ class TestRegister(unittest.TestCase):
         self.ctx.hooks["transform_llm_output"](
             response_text="要不要我继续？", session_id="s4",
             model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s4", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s4")
         self.assertEqual(len(self.ctx.injected), 1)
 
         # a turn that ends cleanly closes the chain
         self.ctx.hooks["transform_llm_output"](
             response_text="已完成。", session_id="s4", model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s4", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s4")
         self.assertEqual(len(self.ctx.injected), 1)
 
         # the next turn may be nudged again
         self.ctx.hooks["transform_llm_output"](
             response_text="要不要我再做？", session_id="s4",
             model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s4", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s4")
         self.assertEqual(len(self.ctx.injected), 2)
 
     def test_cooldown_blocks_rapid_second_nudge(self):
@@ -127,12 +186,12 @@ class TestRegister(unittest.TestCase):
         self.ctx.hooks["transform_llm_output"](
             response_text="要不要我继续？", session_id="s5",
             model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s5", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s5")
         self.assertEqual(len(self.ctx.injected), 1)
         self.ctx.hooks["transform_llm_output"](
             response_text="要不要我再做？", session_id="s5",
             model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s5", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s5")
         self.assertEqual(len(self.ctx.injected), 1)  # cooldown, not 2
 
     def test_dry_run_never_injects(self):
@@ -140,7 +199,7 @@ class TestRegister(unittest.TestCase):
         self.ctx.hooks["transform_llm_output"](
             response_text="要不要我继续？", session_id="s6",
             model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s6", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s6")
         self.assertEqual(self.ctx.injected, [])
 
     def test_disabled_never_injects(self):
@@ -148,14 +207,14 @@ class TestRegister(unittest.TestCase):
         self.ctx.hooks["transform_llm_output"](
             response_text="要不要我继续？", session_id="s7",
             model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s7", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s7")
         self.assertEqual(self.ctx.injected, [])
 
     def test_event_log_records_the_evaluation(self):
         self.ctx.hooks["transform_llm_output"](
             response_text="要不要我继续？", session_id="s8",
             model="m", platform="cli")
-        self.ctx.hooks["on_session_end"](session_id="s8", platform="qqbot")
+        self.ctx.hooks["on_session_end"](platform="cli", session_id="s8")
         log = Path(self._tmp.name) / ".hermes" / "continue-hook-events.jsonl"
         self.assertTrue(log.exists())
         self.assertIn("nudge", log.read_text(encoding="utf-8"))

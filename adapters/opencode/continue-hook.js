@@ -1,4 +1,5 @@
 /**
+ * hermes-continue-hook: generated — do not edit
  * continue-hook for OpenCode — a session-idle plugin.
  *
  * OpenCode plugin contract (verified against opencode.ai/docs/plugins and

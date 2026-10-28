@@ -1,8 +1,0 @@
-{
-  "name": "continue-hook-opencode",
-  "version": "1.2.0",
-  "type": "module",
-  "description": "continue-hook for OpenCode",
-  "license": "MIT",
-  "main": "plugins/continue-hook.js"
-}

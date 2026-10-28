@@ -27,5 +27,6 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
-  }
+  },
+  "_continueHook": "hermes-continue-hook: generated — do not edit"
 }

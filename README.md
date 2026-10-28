@@ -60,9 +60,21 @@ The nudge is injected as a new user-role message into the **same session**
 agent finishes the work by itself. Functionally equivalent — but you will see
 **two messages instead of one**, and the stray question stays in the chat log.
 
-Injection is a privileged operation, so Hermes gates it per plugin. On a
-**gateway** session (Telegram, QQ, Discord …) the nudge is delivered only when
-the plugin has been granted the permission — Hermes refuses it otherwise:
+**Delivery depends on the host, and one case is not supported yet.**
+
+| Session | Delivered? |
+|---|---|
+| CLI / TUI / desktop | Yes — the nudge goes into the local input queue |
+| Messaging gateway (Telegram, QQ, Discord …) | **No.** `on_session_end` is given `session_id`, `task_id`, `turn_id`, `completed`, `failed`, `interrupted`, `turn_exit_reason`, `model` and `platform` — neither the durable composite `session_key` nor an `origin` mapping that a gateway injection requires. Fabricating a key would target a session that does not exist. |
+
+On a gateway the hook still evaluates and logs, and records
+`inject_unsupported_gateway` so the gap is visible in `/ch-stats` instead of
+looking like a nudge that silently went nowhere. **For same-turn continuation on
+a messaging gateway use [patch mode](patch-mode/README.md)** — it runs inside the
+turn and needs no injection.
+
+Injection is privileged, so Hermes also gates it per plugin; a self-hosted
+gateway deployment that does pass a `session_key` needs:
 
 ```yaml
 plugins:
@@ -70,10 +82,6 @@ plugins:
     continue-hook:
       allow_gateway_injection: true
 ```
-
-Without that key the hook still evaluates and logs every decision, but the
-injection is recorded as rejected and no message is delivered. **CLI sessions
-need no permission** — the nudge goes into the running turn directly.
 
 For the seamless behavior (the gate fires *inside* the agent loop, the question
 is never delivered, you only get the finished result) use **patch mode** —
@@ -277,9 +285,9 @@ of date.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests   # 141 tests: detector, plugin, 8 adapters, dsh/pi contracts
-node tests/test_opencode.mjs            # 10 tests: OpenCode plugin against a mock SDK client
-node tests/test_installer.mjs           # 21 tests: install / idempotence / uninstall / non-destruction
+python3 -m unittest discover -s tests   # 143 tests: detector, plugin, 8 adapters, dsh/pi contracts
+node tests/test_opencode.mjs            # 13 tests: OpenCode plugin against a mock SDK client
+node tests/test_installer.mjs           # 28 tests: install / idempotence / uninstall / non-destruction
 node tests/test_dsh.mjs                 # 7 tests: dsh plugin, compiled against the real dsh packages
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```

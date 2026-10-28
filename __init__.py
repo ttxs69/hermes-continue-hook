@@ -105,15 +105,33 @@ def register(ctx: Any) -> None:
                 return
             nudge = build_nudge(decision.attempt)
             # Injection contract (hermes_cli/plugins_injection.py):
-            #  * CLI mode  — no target at all; the message goes to the local
-            #    REPL queue and the agent continues.
-            #  * Gateway   — a durable session_key (a composite key such as
-            #    "agent:main:discord:thread:42") or an origin mapping.
-            # Passing ``origin=True`` is not a mapping and is rejected, which
-            # would break the CLI path too.
-            key = str(kw.get("session_key") or session_id or "")
-            injected = bool(ctx.inject_message(nudge, role="user", session_key=key)) if (
-                key and ":" in key) else bool(ctx.inject_message(nudge, role="user"))
+            #  * CLI / TUI / desktop — no target; the message goes to the local
+            #    input queue and the agent continues.
+            #  * Messaging gateway   — needs a durable composite ``session_key``
+            #    (e.g. "agent:main:discord:thread:42") or an ``origin`` mapping.
+            #
+            # The ``on_session_end`` payload carries session_id, task_id,
+            # turn_id, completed, failed, interrupted, turn_exit_reason, model
+            # and platform — neither a session_key nor an origin. So on a
+            # gateway there is nothing valid to pass, and a fabricated key would
+            # target a session that does not exist. Say so instead of writing a
+            # cheerful "nudged" record that never reached anyone.
+            key = str(kw.get("session_key") or "")
+            origin = kw.get("origin")
+            platform_name = str(platform or "").lower()
+            is_local = platform_name in ("", "cli", "tui", "desktop", "local")
+            if key and ":" in key:
+                injected = bool(ctx.inject_message(nudge, role="user", session_key=key))
+            elif origin is not None:
+                injected = bool(ctx.inject_message(nudge, role="user", origin=origin))
+            elif is_local:
+                injected = bool(ctx.inject_message(nudge, role="user"))
+            else:
+                _log({"session": sid, "decision": "inject_unsupported_gateway",
+                      "reason": f"platform {platform_name!r} gives on_session_end no "
+                                f"session_key/origin; use patch mode for same-turn "
+                                f"continuation on messaging gateways"})
+                return
             if not injected:
                 _log({"session": sid, "decision": "inject_failed",
                       "reason": "the host did not accept the nudge"})

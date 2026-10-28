@@ -27,6 +27,7 @@
     "hooks/",
     "detector.py",
     "hookctl.py",
+    "agent-hooks/",
     "docs/",
     "README.md",
     "LICENSE",

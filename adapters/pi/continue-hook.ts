@@ -1,4 +1,5 @@
 /**
+ * hermes-continue-hook: generated — do not edit
  * continue-hook for Pi — an extension that continues the turn when the
  * assistant ends by asking permission for something it could have done.
  *
@@ -102,7 +103,16 @@ export default function continueHookPiExtension(pi: any) {
     try {
       const messages: any[] = event?.messages ?? event?.entries ?? [];
       const text = lastAssistantText(messages);
-      if (!text) return undefined;
+      if (!text) {
+        // No readable assistant text in this event: nothing to judge. Say so on
+        // stderr rather than passing silently, so a Pi API change that renames
+        // the field shows up in the user's log instead of "it just never fires".
+        console.error(
+          "continue-hook(pi): no assistant text in the settle event — " +
+            "Pi may have renamed messages/entries; nothing was evaluated",
+        );
+        return undefined;
+      }
 
       const sessionId = String(event?.sessionId ?? event?.session_id ?? "pi");
       const verdict = shouldNudge(text, sessionId);

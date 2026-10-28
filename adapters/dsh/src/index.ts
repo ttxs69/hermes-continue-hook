@@ -1,4 +1,5 @@
 /**
+ * hermes-continue-hook: generated — do not edit
  * continue-hook for DeepSeek Harness (dsh) — a native Cordis plugin.
  *
  * dsh is an "everything is a plugin" harness built on Cordis

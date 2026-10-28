@@ -209,9 +209,13 @@ def _int(value: Any, fallback: int) -> int:
 
 
 def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
-    """Return ``(should_nudge, reason_code)``. Pure transport layer."""
-    if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
-        return False, "max_nudges"
+    """Return ``(should_nudge, reason_code)``. Pure transport layer.
+
+    The per-turn cap is applied **after** the text is judged: whether a reply
+    ends the turn is a property of the text, and the caller has to know it even
+    once the cap is reached — otherwise the nudge chain never closes and that
+    session stays muted for good.
+    """
     if not text or not str(text).strip():
         return False, "empty"
     tail = str(text).strip()[-_int(cfg.get("tail_chars", 240), 240):]
@@ -228,12 +232,19 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     no_urls = _URL_RE.sub(" ", no_urls)
     no_urls = _CODE_BLOCK_RE.sub(" ", no_urls)
     no_urls = _INLINE_CODE_RE.sub(" ", no_urls)
+    hit = None
     for name in ("offer", "hand_off", "confirm_seek"):
         if _compile(tr.get(name)).search(trig_tail):
-            return True, f"trigger:{name}"
-    if tr.get("question_mark", True) and re.search(r"[？?]", no_urls):
-        return True, "trigger:question_mark"
-    return False, "no_trigger"
+            hit = f"trigger:{name}"
+            break
+    if hit is None and tr.get("question_mark", True) and re.search(r"[？?]", no_urls):
+        hit = "trigger:question_mark"
+    if hit is None:
+        # The turn ended cleanly — say so even when the cap is already reached.
+        return False, "no_trigger"
+    if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
+        return False, "max_nudges"
+    return True, hit
 
 
 def build_nudge(attempt: int) -> str:

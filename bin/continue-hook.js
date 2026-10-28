@@ -169,7 +169,7 @@ function parseArgs(argv) {
  * settings.json — including a JSONC file with comments, which many hosts
  * accept and JSON.parse does not. Callers get the error so they can refuse.
  */
-function readJson(file, { allowBroken = false, dryRun = false } = {}) {
+function readJson(file, { onBroken = "abort", dryRun = false } = {}) {
   if (!existsSync(file)) return {};
   let raw = readFileSync(file, "utf8");
   // A UTF-8 BOM is what Notepad and several Windows tools write; JSON.parse
@@ -181,7 +181,11 @@ function readJson(file, { allowBroken = false, dryRun = false } = {}) {
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (err) {
-    if (allowBroken) return {};
+    // "ignore": a read-only caller (check) just reports the file as not ours.
+    // "skip": the caller handles it (uninstall must not truncate the file, and
+    // must not abort the rest of the hosts in the same run).
+    if (onBroken === "ignore") return {};
+    if (onBroken === "skip") return null;
     const backup = `${file}.bak-${Date.now()}`;
     // A dry run must leave the disk untouched — including the backup.
     if (!dryRun) writeFileSync(backup, raw, "utf8");
@@ -285,7 +289,7 @@ const installedHosts = () => {
       if (isOurFile(path.join(expand(def.target), "package.json"))) out.push(host);
       continue;
     }
-    const data = readJson(expand(def.config));
+    const data = readJson(expand(def.config), { onBroken: "ignore" });
     const key =
       def.kind === "cursor-stop" ? "stop" : def.kind === "copilot-stop" ? "agentStop" : def.kind === "gemini-after" ? "AfterAgent" : "Stop";
     const list = data?.hooks?.[key];
@@ -368,15 +372,20 @@ function removeOurs(data, kind) {
   return data;
 }
 
-/** Markers that identify a file as ours, whatever the host. */
-const OURS_FILE_MARKERS = ["continue-hook", "hookctl.py"];
+/**
+ * The exact line every file we install carries.
+ *
+ * A substring test on "continue-hook" was not good enough: a user's own
+ * extension that merely mentions the name in a comment was treated as ours and
+ * deleted by uninstall.
+ */
+const GENERATED_MARKER = "hermes-continue-hook: generated";
 
 /** True when the file at `file` exists and was written by this tool. */
 const isOurFile = (file) => {
   try {
     if (!existsSync(file)) return false;
-    const head = readFileSync(file, "utf8").slice(0, 4000);
-    return OURS_FILE_MARKERS.some((marker) => head.includes(marker));
+    return readFileSync(file, "utf8").slice(0, 4000).includes(GENERATED_MARKER);
   } catch {
     return false;
   }
@@ -389,9 +398,11 @@ const isOurFile = (file) => {
  * only true of the *source*). A user's own hand-written extension at the same
  * path was replaced without a word.
  */
-const copyFile = (from, to, dryRun) => {
+const copyFile = (from, to, dryRun, { own = false } = {}) => {
   if (!existsSync(from)) return { ok: false, reason: "source-missing" };
-  if (existsSync(to) && !isOurFile(to)) {
+  // Files under our own runtime directory are ours by definition — checking a
+  // marker there produced a fresh .bak on every re-install.
+  if (!own && existsSync(to) && !isOurFile(to)) {
     const backup = `${to}.bak-${Date.now()}`;
     if (!dryRun) copyFileSync(to, backup);
     console.error(`! ${to} was not written by continue-hook — saved to ${backup} before replacing it`);
@@ -406,15 +417,15 @@ const copyFile = (from, to, dryRun) => {
 // ── commands ───────────────────────────────────────────────────────────────
 function installRuntime(opts) {
   for (const file of RUNTIME_FILES) {
-    copyFile(path.join(PKG_ROOT, file), path.join(RUNTIME_DIR, file), opts.dryRun);
+    copyFile(path.join(PKG_ROOT, file), path.join(RUNTIME_DIR, file), opts.dryRun, { own: true });
   }
   for (const file of TRANSPORT_FILES) {
-    copyFile(path.join(PKG_ROOT, file.from), path.join(RUNTIME_DIR, file.to), opts.dryRun);
+    copyFile(path.join(PKG_ROOT, file.from), path.join(RUNTIME_DIR, file.to), opts.dryRun, { own: true });
   }
   for (const host of HOST_NAMES) {
     const def = HOSTS[host];
     if (def.kind === "claude-stop" || def.kind === "cursor-stop" || def.kind === "copilot-stop" || def.kind === "gemini-after") {
-      copyFile(path.join(PKG_ROOT, "adapters", def.hook), path.join(RUNTIME_DIR, def.hook), opts.dryRun);
+      copyFile(path.join(PKG_ROOT, "adapters", def.hook), path.join(RUNTIME_DIR, def.hook), opts.dryRun, { own: true });
     }
   }
 }
@@ -481,6 +492,9 @@ function uninstallHost(host, opts) {
       results.push({ path: `${target} (not ours)`, ok: true });
       return results;
     }
+    // A file carrying our generation marker is reproducible from the package,
+    // so it is deleted outright — and never left beside the host, where
+    // OpenCode would load "something.js.removed" as a plugin.
     if (!opts.dryRun) rmSync(target, { force: true });
     results.push({ path: target, ok: true });
     return results;
@@ -502,7 +516,15 @@ function uninstallHost(host, opts) {
     results.push({ path: `${configPath} (absent)`, ok: true });
     return results;
   }
-  const data = readJson(configPath, { allowBroken: true });
+  // Never write over a file we could not parse: allowBroken here turned a
+  // JSONC config into "{}" — install refuses and backs it up, uninstall must
+  // behave the same way instead of truncating the user's settings.
+  const data = readJson(configPath, { dryRun: opts.dryRun, onBroken: "skip" });
+  if (data === null) {
+    console.error(`! ${configPath} is not valid JSON — left untouched. Fix it and re-run to remove the hook.`);
+    results.push({ path: `${configPath} (unparsable, left alone)`, ok: true });
+    return results;
+  }
   const cleaned = removeOurs(data, def.kind);
   if (!opts.dryRun) writeJson(configPath, cleaned);
   results.push({ path: configPath, ok: true });
@@ -530,7 +552,7 @@ function checkHost(host) {
   if (!existsSync(configPath)) {
     return { host, label: def.label, installed: false, detail: `${configPath} (absent)` };
   }
-  const data = readJson(configPath, { allowBroken: true });
+  const data = readJson(configPath, { onBroken: "ignore" });
   const key =
     def.kind === "cursor-stop" ? "stop" : def.kind === "copilot-stop" ? "agentStop" : def.kind === "gemini-after" ? "AfterAgent" : "Stop";
   const list = data?.hooks?.[key];

@@ -19,6 +19,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+ROOT = REPO
 ADAPTERS = REPO / "adapters"
 HOOKS = {
     "claude-code": ADAPTERS / "claude-code" / "stop_hook.py",
@@ -402,6 +403,42 @@ class TestTheCapHoldsAcrossRepeatedStops(unittest.TestCase):
                 timeout=30,
             )
             self.assertEqual(result.stdout.decode().strip(), "")
+
+
+class TestASessionNeverDiesAfterTheCap(unittest.TestCase):
+    """Reaching the per-turn cap must not mute the session for good.
+
+    Checking the cap before judging the text meant a clean end of turn was
+    reported as "max_nudges", which does not close the chain — so the counter
+    stayed at the cap and every later turn in that session was refused. Five
+    hosts that do not report ``stop_hook_active`` were affected.
+    """
+
+    def _run(self, home: Path, text: str) -> dict:
+        env = {**os.environ, "HOME": str(home), "HERMES_CONTINUE_HOOK": "1"}
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "hookctl.py"),
+             "--text", text, "--session", "sess", "--host", "opencode"],
+            capture_output=True, env=env, timeout=30,
+        )
+        return json.loads(result.stdout.decode() or "{}")
+
+    def test_the_third_turn_still_works(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".hermes").mkdir()
+            (home / ".hermes" / "continue_hook.json").write_text(
+                json.dumps({"max_nudges_per_turn": 2}), encoding="utf-8")
+
+            self.assertTrue(self._run(home, ASK_ZH)["should_nudge"])
+            self.assertTrue(self._run(home, ASK_ZH)["should_nudge"])
+            # the cap is reached; a clean ending must still close the chain
+            clean = self._run(home, PLAIN_ZH)
+            self.assertFalse(clean["should_nudge"])
+            self.assertEqual(clean["reason"], "no_trigger")
+            # and a new turn is nudgeable again
+            after = self._run(home, ASK_ZH)
+            self.assertTrue(after["should_nudge"], after)
 
 
 class TestTheChainCloses(unittest.TestCase):

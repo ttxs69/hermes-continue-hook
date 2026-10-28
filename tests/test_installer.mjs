@@ -398,6 +398,75 @@ await test("--dry-run writes nothing at all, not even a backup", () => {
   assert.deepStrictEqual(readdirSync(path.join(home, ".claude")), ["settings.json"]);
 });
 
+await test("uninstall never truncates a config it cannot parse", () => {
+  // It used readJson(..., allowBroken) here, which returned {} and then wrote
+  // it — turning a JSONC settings.json into a single "{}".
+  const home = freshHome();
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  const original = '{\n  // my model\n  "model": "opus"\n}\n';
+  writeFileSync(path.join(home, ".claude", "settings.json"), original);
+  const res = runCli(["uninstall", "--host", "all"], home);
+  assert.strictEqual(res.code, 0, res.out);
+  assert.strictEqual(readFileSync(path.join(home, ".claude", "settings.json"), "utf8"), original,
+    "the user's config was truncated");
+  assert.match(res.out, /not valid JSON/, "the user must be told why it was skipped");
+});
+
+await test("uninstall leaves a user file whose text mentions continue-hook", () => {
+  // isOurFile() matched the substring "continue-hook", so a hand-written
+  // plugin that merely mentions the name in a comment was deleted.
+  const home = freshHome();
+  const plugin = path.join(home, ".config", "opencode", "plugin", "continue-hook.js");
+  mkdirSync(path.dirname(plugin), { recursive: true });
+  const mine = "// my own continue-hook replacement, hand written\nexport const x = 1\n";
+  writeFileSync(plugin, mine);
+  const before = runCli(["check", "--host", "opencode"], home);
+  assert.match(before.out, /✗/, "a user file must not be reported as ours");
+  runCli(["uninstall", "--host", "opencode"], home);
+  assert.strictEqual(readFileSync(plugin, "utf8"), mine, "uninstall deleted the user's file");
+});
+
+await test("every installed host fires through the command written into its config", () => {
+  // The point of this test: install, then run exactly what the host would run,
+  // with that host's real payload shape. Calling the adapter by hand cannot
+  // catch a wrong command, a missing transport module, or a renamed field.
+  const home = freshHome();
+  const transcript = path.join(home, "transcript.jsonl");
+  writeFileSync(transcript,
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "要不要我顺便补个测试？" }] } }) + "\n");
+
+  runCli(["install", "--host", "claude-code,codex,qwen,cursor,copilot,gemini"], home);
+
+  const cases = [
+    { host: "claude-code", file: ".claude/settings.json", key: "Stop",
+      payload: { session_id: "c1", stop_hook_active: false, last_assistant_message: "要不要我顺便补个测试？" }, expect: "block" },
+    { host: "codex", file: ".codex/hooks.json", key: "Stop",
+      payload: { session_id: "x1", turn_id: "t1", stop_hook_active: false, last_assistant_message: "要不要我顺便补个测试？" }, expect: "block" },
+    { host: "qwen", file: ".qwen/settings.json", key: "Stop",
+      payload: { session_id: "q1", last_assistant_message: "要不要我顺便补个测试？" }, expect: "block" },
+    { host: "cursor", file: ".cursor/hooks.json", key: "stop",
+      payload: { status: "completed", loop_count: 0, conversation_id: "cu1", transcript_path: transcript }, expect: "followup_message" },
+    { host: "copilot", file: ".copilot/hooks/continue-hook.json", key: "agentStop",
+      payload: { sessionId: "cp1", transcriptPath: transcript, stopReason: "end_turn" }, expect: "block" },
+    { host: "gemini", file: ".gemini/settings.json", key: "AfterAgent",
+      payload: { prompt: "go", prompt_response: "要不要我顺便补个测试？", stop_hook_active: false,
+                 session_id: "g1", hook_event_name: "AfterAgent", timestamp: 1 }, expect: "deny" },
+  ];
+
+  for (const c of cases) {
+    const group = readJson(path.join(home, c.file)).hooks[c.key][0];
+    const cmd = group.hooks ? group.hooks[0].command : (group.command || group.bash);
+    assert.ok(cmd, `${c.host}: no command was written`);
+    const out = execFileSync("sh", ["-c", cmd], {
+      input: JSON.stringify(c.payload),
+      env: { ...process.env, HOME: home },
+      encoding: "utf8",
+    });
+    assert.ok(out.includes(c.expect), `${c.host} did not emit ${c.expect}: ${out.slice(0, 120)}`);
+    assert.ok(out.includes("continue-hook"), `${c.host}: wrong nudge payload`);
+  }
+});
+
 await test("check reports what is installed", () => {
   const home = freshHome();
   runCli(["install", "--host", "claude-code"], home);

@@ -139,8 +139,12 @@ def write_state(state: dict[str, Any], path: Path | str | None = None) -> None:
     """Persist the state file. Never raises — losing state must not break a turn."""
     state_path = Path(path) if path else default_state_path()
     try:
-        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        try:
+            state_path.chmod(0o600)
+        except OSError:
+            pass
     except Exception:
         pass
 
@@ -245,6 +249,27 @@ def _num(value: Any, fallback: float, *, integer: bool) -> float:
         except ValueError:
             return float(fallback)
     return float(fallback)
+
+
+STATE_TTL_SECONDS = 30 * 24 * 3600
+
+
+def _prune_sessions(state: dict[str, Any], now: float | None = None) -> None:
+    """Drop sessions we have not seen for a month.
+
+    Without this the table grows forever, and a host that reuses a session id
+    inherits whatever count the old session left behind.
+    """
+    sessions = state.get("sessions")
+    if not isinstance(sessions, dict):
+        return
+    cutoff = (now if now is not None else time.time()) - STATE_TTL_SECONDS
+    for name in [
+        name
+        for name, entry in sessions.items()
+        if not isinstance(entry, dict) or _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cutoff
+    ]:
+        sessions.pop(name, None)
 
 
 def _session_entry(state: dict[str, Any], session_id: str) -> dict[str, Any]:
@@ -358,9 +383,9 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
                    continued: bool, platform: str) -> Decision:
     """The decision itself. Callers hold the state lock."""
     state = read_state(state_path)
-    entry = _session_entry(state, session_id)
-
     now = time.time()
+    _prune_sessions(state, now)
+    entry = _session_entry(state, session_id)
     chain_open = bool(entry.get("chain")) or continued
     if not chain_open:
         # A fresh turn: the per-turn counter starts from zero.
@@ -408,6 +433,19 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
         return finish(False, "disabled")
     if not text or not text.strip():
         return finish(False, "empty")
+
+    try:
+        should, reason = detect(text, attempt, cfg)
+    except Exception as exc:  # detection must never break a turn
+        return finish(False, f"error:{type(exc).__name__}")
+
+    # Judge the text *before* the caps. A clean end of turn has to close the
+    # chain even when the per-turn cap is already reached, or the chain stays
+    # open forever and that session never nudges again — which is what checking
+    # the cap first did to hermes / opencode / pi / dsh / cursor.
+    if reason in closing_reasons:
+        return finish(False, reason)
+
     if chain_open:
         max_per_turn = int(_num(cfg.get("max_nudges_per_turn", 2), 2, integer=True))
         if attempt >= max_per_turn:
@@ -418,11 +456,6 @@ def _decide_locked(text: str, *, session_id: str, host: str, cfg: dict[str, Any]
     cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
     if cooldown > 0 and total > 0 and now - _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cooldown:
         return finish(False, "cooldown")
-
-    try:
-        should, reason = detect(text, attempt, cfg)
-    except Exception as exc:  # detection must never break a turn
-        return finish(False, f"error:{type(exc).__name__}")
 
     if cfg.get("dry_run"):
         return finish(False, "dry_run")
