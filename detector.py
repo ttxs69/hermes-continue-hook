@@ -22,7 +22,9 @@ __all__ = ["DEFAULTS", "ConfigStore", "build_nudge", "default_config", "detect"]
 # runs on the quote-stripped tail (found via live dogfooding: a report that
 # quoted the trigger patterns fired the trigger). Exclusion matching still
 # scans the RAW tail — the safe direction (skip more, nudge less).
-_QUOTE_RE = re.compile(r"「[^」]{0,80}」|『[^』]{0,80}』|\u201c[^\u201d]{0,80}\u201d|'[^']{0,60}'")
+_QUOTE_RE = re.compile(
+    r"「[^」]{0,80}」|『[^』]{0,80}』|\u201c[^\u201d]{0,80}\u201d|'[^']{0,60}'|\"[^\"\n]{0,120}\""
+)  # ASCII double quotes are the most common way to quote in English
 
 # A question mark inside a URL is not a question. Without this, a reply that
 # ends with a link ("docs at https://example.com/x?y=1") looked like a
@@ -30,7 +32,9 @@ _QUOTE_RE = re.compile(r"「[^」]{0,80}」|『[^』]{0,80}』|\u201c[^\u201d]{0
 _URL_RE = re.compile(r"https?://[^\s<>）)\]\"']+")
 _MARKDOWN_LINK_RE = re.compile(r"\]\([^)]*\)")
 # A "?" inside a code block or inline code is syntax, not a question.
-_CODE_BLOCK_RE = re.compile(r"```.*?```", re.S)
+# A closing fence may be missing (the reply was truncated, or the model wrote an
+# opening fence by hand) — everything after an opening fence is still code.
+_CODE_BLOCK_RE = re.compile(r"```.*?```|```[\s\S]*$", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]{1,120}`")
 
 NUDGE_TEMPLATE = (
@@ -229,7 +233,17 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     """
     if not text or not str(text).strip():
         return False, "empty"
-    tail = str(text).strip()[-_int(cfg.get("tail_chars", 240), 240) :]
+    full = str(text).strip()
+    # Strip code and links from the WHOLE reply, then take the closing window.
+    # Doing it the other way round meant a fenced block whose closing ``` fell
+    # outside the last 240 characters left its "?" in place — and "the reply
+    # ends with a code block" is one of the most common shapes.
+    stripped = _CODE_BLOCK_RE.sub(" ", full)
+    stripped = _INLINE_CODE_RE.sub(" ", stripped)
+    stripped = _MARKDOWN_LINK_RE.sub(" ", stripped)
+    stripped = _URL_RE.sub(" ", stripped)
+    tail_chars = _int(cfg.get("tail_chars", 240), 240)
+    tail = full[-tail_chars:]
     ex = cfg.get("exclusions", {})
     if _compile(ex.get("boundary")).search(tail):
         return False, "boundary"
@@ -237,12 +251,9 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
         return False, "user_must"
     tr = cfg.get("triggers", {})
     trig_tail = _QUOTE_RE.sub("", tail)  # quoted mentions are not asks
-    # URLs and markdown link targets are stripped before the bare-question-mark
-    # trigger: a "?" inside a link is not a question.
-    no_urls = _MARKDOWN_LINK_RE.sub(" ", trig_tail)
-    no_urls = _URL_RE.sub(" ", no_urls)
-    no_urls = _CODE_BLOCK_RE.sub(" ", no_urls)
-    no_urls = _INLINE_CODE_RE.sub(" ", no_urls)
+    # The closing window of the code-stripped text, so the "?" check only sees
+    # punctuation that is actually prose.
+    no_urls = _QUOTE_RE.sub("", stripped[-tail_chars:])
     hit = None
     for name in ("offer", "hand_off", "confirm_seek"):
         if _compile(tr.get(name)).search(trig_tail):

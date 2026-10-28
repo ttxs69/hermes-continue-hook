@@ -220,6 +220,59 @@ test("I4 a batch continues past a broken host", () => {
   assert.strictEqual(readFileSync(path.join(home, ".cursor/hooks.json"), "utf8"), JSONC);
 });
 
+// ── I6: what we write is what the host will load ───────────────────────────
+
+test("I6 every config we write satisfies its host's schema", () => {
+  // The matrix proved the tool was self-consistent; it never asserted that the
+  // file it wrote would be loaded. Cursor and Copilot both require a top-level
+  // `version`, and a file without it is rejected whole.
+  const home = freshHome();
+  const res = cli(["install", "--host", "cursor,copilot,claude-code,gemini,codex,qwen"], home);
+  assert.strictEqual(res.code, 0, res.out);
+
+  for (const [host, rel] of Object.entries(CONFIGS)) {
+    const cfg = readJsonFile(path.join(home, rel));
+    assert.ok(cfg && typeof cfg === "object" && !Array.isArray(cfg), `${host}: not an object`);
+    if (host === "cursor" || host === "copilot") {
+      assert.strictEqual(cfg.version, 1, `${host}: a missing version makes the whole file invalid`);
+    }
+    const key = { "claude-code": "Stop", codex: "Stop", qwen: "Stop",
+                  cursor: "stop", copilot: "agentStop", gemini: "AfterAgent" }[host];
+    assert.ok(Array.isArray(cfg.hooks[key]), `${host}: hooks.${key} must be an array`);
+  }
+});
+
+test("I6 an unusable config shape is skipped, never overwritten", () => {
+  const shapes = {
+    "top-level array": "[]",
+    "hooks is not an object": '{"hooks": []}',
+    "hooks.Stop is a string": '{"hooks": {"Stop": "nope"}}',
+  };
+  for (const [label, content] of Object.entries(shapes)) {
+    const home = freshHome();
+    mkdirSync(path.join(home, ".claude"), { recursive: true });
+    const file = path.join(home, ".claude/settings.json");
+    writeFileSync(file, content);
+    const res = cli(["install", "--host", "claude-code"], home);
+    assert.strictEqual(res.code, 3, `${label}: must be reported, not reported as installed`);
+    assert.strictEqual(readFileSync(file, "utf8"), content, `${label}: the file was modified`);
+  }
+});
+
+test("I6 a single object where an array is expected keeps the user's hook", () => {
+  const home = freshHome();
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  writeFileSync(
+    path.join(home, ".claude/settings.json"),
+    JSON.stringify({ hooks: { Stop: { hooks: [{ type: "command", command: "teammate.sh" }] } } }),
+  );
+  const res = cli(["install", "--host", "claude-code"], home);
+  assert.strictEqual(res.code, 0, res.out);
+  const blob = readFileSync(path.join(home, ".claude/settings.json"), "utf8");
+  assert.ok(blob.includes("teammate.sh"), "the user's hook was dropped");
+  assert.ok(blob.includes(".hermes"), "our hook was not added");
+});
+
 // ── I5: exit code matches what happened ────────────────────────────────────
 
 test("I5 a clean run exits 0 and a skipped host exits 3", () => {

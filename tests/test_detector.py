@@ -283,6 +283,43 @@ class TestPublishingIsABoundary(unittest.TestCase):
             self.assertFalse(got, f"{text} → {reason}")
 
 
+class TestQuotedAndCodeSpans(unittest.TestCase):
+    """A quoted phrase is a mention, and code is not prose.
+
+    Both rules existed, but each had a hole that made the reply look like a
+    question: ASCII double quotes were not treated as quotes, and a fenced block
+    whose closing ``` fell outside the 240-character window was not stripped.
+    """
+
+    def case(self, text, expect):
+        got, reason = detect(text, 0, default_config())
+        self.assertEqual(got, expect, f"{text!r} → {reason}")
+
+    def test_ascii_double_quotes_are_a_mention(self):
+        self.case('The log said "Should I continue?" three times.', False)
+        self.case('He asked "要不要我顺便补个测试？" and I said no.', False)
+
+    def test_a_real_question_still_counts(self):
+        self.case("Should I continue?", True)
+        self.case("要不要我顺便补个测试？", True)
+
+    def test_a_code_block_that_ends_the_reply(self):
+        self.case("```python\na = b ? c : d\n```", False)
+
+    def test_a_code_block_longer_than_the_window(self):
+        block = "\n".join(f"x{i} = a ? b : c" for i in range(40))
+        self.case(f"```python\n{block}\n```", False)
+
+    def test_an_unclosed_fence_is_still_code(self):
+        self.case("```python\na = b ? c : d\n", False)
+
+    def test_inline_code_is_not_prose(self):
+        self.case("已改好 `a ? b : c` 的写法。", False)
+
+    def test_a_question_outside_the_code_still_counts(self):
+        self.case("要不要我顺手也改一下 `a ? b : c`？", True)
+
+
 class TestNudge(unittest.TestCase):
     def test_attempt_numbering(self):
         self.assertIn("#1", build_nudge(0))
