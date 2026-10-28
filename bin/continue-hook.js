@@ -17,7 +17,7 @@
  *   * non-destructive — your other hooks and settings keys survive,
  *   * reversible — uninstall removes only what this tool installed.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, cpSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -699,8 +699,33 @@ Event log:    ~/.hermes/continue-hook-events.jsonl`);
     if (stillUsed.length) {
       console.log(`\nRuntime kept: ${RUNTIME_DIR} (still needed by ${stillUsed.join(", ")})`);
     } else if (existsSync(RUNTIME_DIR) && !opts.dryRun) {
-      rmSync(RUNTIME_DIR, { recursive: true, force: true });
-      console.log(`\nRuntime removed: ${RUNTIME_DIR}`);
+      // Only the files we put there. The dsh target lives *inside* this
+      // directory, so removing the tree would delete a user's own dsh plugin.
+      for (const file of RUNTIME_FILES) rmSync(path.join(RUNTIME_DIR, file), { force: true });
+      for (const file of TRANSPORT_FILES) rmSync(path.join(RUNTIME_DIR, file.to), { force: true });
+      for (const host of HOST_NAMES) {
+        const def = HOSTS[host];
+        if (def.hook) rmSync(path.join(RUNTIME_DIR, def.hook), { force: true });
+      }
+      // Prune the now-empty per-host directories, then the root if it is empty.
+      const pruneEmpty = (dir) => {
+        if (!existsSync(dir)) return;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (entry.isDirectory()) {
+            const child = path.join(dir, entry.name);
+            pruneEmpty(child);
+            if (existsSync(child) && !readdirSync(child).length) rmSync(child, { recursive: true, force: true });
+          }
+        }
+      };
+      pruneEmpty(RUNTIME_DIR);
+      const leftover = existsSync(RUNTIME_DIR) ? readdirSync(RUNTIME_DIR) : [];
+      if (!leftover.length) {
+        rmSync(RUNTIME_DIR, { recursive: true, force: true });
+        console.log(`\nRuntime removed: ${RUNTIME_DIR}`);
+      } else {
+        console.log(`\nRuntime kept: ${RUNTIME_DIR} (still holds ${leftover.join(", ")})`);
+      }
     }
   }
 

@@ -61,6 +61,8 @@ jobs:
         run: node tests/test_opencode.mjs
       - name: Installer tests
         run: node tests/test_installer.mjs
+      - name: Lifecycle invariants
+        run: node tests/test_lifecycle.mjs
 
   dsh:
     name: dsh plugin (typecheck + runtime)

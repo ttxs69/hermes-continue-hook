@@ -19,6 +19,7 @@ python3 -m unittest discover -s tests
 echo "== node tests"
 node tests/test_opencode.mjs
 node tests/test_installer.mjs
+node tests/test_lifecycle.mjs
 
 echo "== npm pack (contents)"
 npm pack --dry-run > /dev/null
