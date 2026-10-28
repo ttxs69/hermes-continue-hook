@@ -98,6 +98,68 @@ class TestVersionConsistency(unittest.TestCase):
         self.assertIn(self.version, text)
 
 
+class TestToolchainIsPinned(unittest.TestCase):
+    """One node version, one npm, everywhere.
+
+    The publish workflow used to run `npm install -g npm@latest` while every
+    other job ran the npm that ships with the node it was given. "latest" is
+    not a version, so the publish job drifted away from CI: npm 12 installs a
+    different layout (no `.bin` shim for some packages), and the dsh runtime
+    test failed on a missing tsc — a symptom of the environments differing,
+    not of the plugin being broken.
+
+    These tests make the alignment checkable instead of a convention.
+    """
+
+    def test_nvmrc_is_the_single_source_of_truth(self) -> None:
+        nvmrc = REPO / ".nvmrc"
+        self.assertTrue(nvmrc.exists(), "no .nvmrc — the node version is not pinned")
+        version = nvmrc.read_text(encoding="utf-8").strip()
+        self.assertRegex(version, r"^\d+(\.\d+)*$", f"unexpected .nvmrc content: {version!r}")
+
+    def test_workflows_use_the_pinned_node_major(self) -> None:
+        pinned = (REPO / ".nvmrc").read_text(encoding="utf-8").strip().split(".")[0]
+        for workflow in sorted((REPO / ".github" / "workflows").glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if "node-version:" not in line:
+                    continue
+                value = line.split(":", 1)[1].strip().strip('"')
+                # A matrix (`["22", "24"]`) and an expression are both fine:
+                # the matrix job exists to prove the shipped CLI runs on
+                # several node versions, and it does not run the release.
+                if value.startswith("[") or value.startswith("${{"):
+                    continue
+                # node 18 is the compatibility floor and is deliberately older.
+                if value == "18":
+                    continue
+                self.assertEqual(
+                    value,
+                    pinned,
+                    f"{workflow.name} uses node {value}, but .nvmrc pins {pinned}. "
+                    "The publish job must run the same npm as every other job.",
+                )
+
+    def test_engines_state_the_npm_floor(self) -> None:
+        import json
+
+        package = json.loads((REPO / "package.json").read_text(encoding="utf-8"))
+        engines = package.get("engines", {})
+        self.assertIn("npm", engines, "package.json engines must state the npm floor")
+        # `npm stage publish` needs 11.15.0+; trusted publishing needs 11.5.1+.
+        self.assertIn("11.15.0", engines["npm"])
+
+    def test_no_workflow_upgrades_npm(self) -> None:
+        for workflow in sorted((REPO / ".github" / "workflows").glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            self.assertNotIn(
+                "npm install -g npm@latest",
+                text,
+                f"{workflow.name} upgrades npm to 'latest' — that is not a version, "
+                "and it made the publish job behave differently from CI.",
+            )
+
+
 class TestProjectHygiene(unittest.TestCase):
     """A published package must not carry local paths or credentials."""
 
