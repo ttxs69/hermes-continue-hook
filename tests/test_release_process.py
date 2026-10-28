@@ -243,17 +243,41 @@ class TestTheWorkflowsReadTheNodeVersionFromOneFile(unittest.TestCase):
                     f"{workflow.name}: job '{job}' sets up node without .nvmrc",
                 )
 
-    def test_the_file_holds_a_major_version_only(self) -> None:
-        """`.nvmrc` names a major, so CI tracks the latest patch of it.
+    def test_the_file_pins_an_exact_version(self) -> None:
+        """A major prefix is not a pin.
 
-        The floating `node-version: "24"` was itself a bug — different jobs
-        landed on 24.21 and 24.22 and disagreed — but pinning an exact patch
-        in one file would make every security release a manual bump. A major
-        is the right granularity: one node line, newest security patch.
+        `.nvmrc` held "24" and both sides claimed to agree — until the day
+        setup-node resolved it to 24.21.0 while the development machine ran
+        24.22.1. That is not a hypothetical: it is the same class of drift
+        that cost six release attempts, and it was still there after the
+        first version of this test, which only asserted a major.
+
+        An exact version has one cost — a security release is a one-line
+        commit rather than an automatic pickup. That is the trade this
+        project wants: a bump you can see in the log, not a difference you
+        discover from a failed release.
         """
         value = (REPO / ".nvmrc").read_text(encoding="utf-8").strip()
-        self.assertTrue(value.isdigit(), f".nvmrc should hold a major, got {value!r}")
-        self.assertGreaterEqual(int(value), 18)
+        parts = value.split(".")
+        self.assertEqual(
+            len(parts),
+            3,
+            f".nvmrc must pin an exact version (x.y.z), got {value!r}",
+        )
+        self.assertTrue(all(p.isdigit() for p in parts), f"not a version: {value!r}")
+
+    def test_the_gate_compares_the_whole_version(self) -> None:
+        """The gate must reject a different *patch*, not just a different major."""
+        gate = (REPO / "scripts" / "check.sh").read_text(encoding="utf-8")
+        self.assertIn('PINNED="$(tr -d', gate)
+        self.assertIn('[ "${CURRENT}" != "${PINNED}" ]', gate)
+        # The old shape compared only the first component. Keep it out.
+        self.assertNotIn("cut -d. -f1", gate)
+
+    def test_the_pre_commit_hook_compares_the_whole_version(self) -> None:
+        hook = (REPO / ".husky" / "pre-commit").read_text(encoding="utf-8")
+        self.assertIn('[ "${CURRENT}" != "${PINNED}" ]', hook)
+        self.assertNotIn("cut -d. -f1", hook)
 
 
 class TestGitHooks(unittest.TestCase):
