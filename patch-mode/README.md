@@ -61,6 +61,18 @@ It drifted from the shared engine within days. Generating it removes the
 second implementation entirely, and `tests/test_patch_mode.py` fails the
 build when the generated file is stale.
 
+**And the patch does not carry a copy of it either.** `core-gate.patch` used
+to embed `agent/continue_hook.py` as well — hand-maintained, while the file
+next to it was generated. They drifted the same way: the copy in the patch
+had no `strip_code_and_links` (so a reply ending in a code block counted as a
+question) and an older trigger list, which meant patch mode and plugin mode
+ran **different rules on the same machine**.
+
+So the patch carries only the core edits, and `install.sh` copies the
+generated module into the tree. There is nothing left to drift, and two
+tests now say so: one asserts the patch does not embed the module, the other
+compares the generated module and the shared engine on real sentences.
+
 ## Install
 
 ```bash
@@ -106,8 +118,10 @@ The same shared config and the same event log as every other host:
 
 ## Files
 
-- `core-gate.patch` — the multi-file diff against the Hermes core
-- `continue_hook.py` — **generated** module the core gate imports
+- `core-gate.patch` — the diff against the Hermes core (the gate only; it
+  carries **no** copy of the module below)
+- `continue_hook.py` — **generated** module the core gate imports;
+  `install.sh` copies this file into the core tree
 - `install.sh` — version-guarded installer / remover
 
 ## Pinned revision
