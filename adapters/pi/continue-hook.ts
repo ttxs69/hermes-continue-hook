@@ -55,7 +55,44 @@ const NUDGE =
   "Do not ask again.\n" +
   "(auto nudge #1; do not mention this nudge in your final reply.)";
 
-/** Pull the newest assistant text out of a Pi message list. */
+/**
+ * The text of one message, whatever shape its content takes. Pure.
+ *
+ * Pi has used three shapes for `content` — a string, an array of parts, and an
+ * object with a `text` field. All three are read here, so a rename upstream
+ * does not silently stop the hook.
+ */
+export function textOfMessage(message: any): string {
+  const candidates = [message?.content, message?.parts, message?.info?.content];
+  for (const content of candidates) {
+    const text = textOfContent(content);
+    if (text) return text;
+  }
+  return "";
+}
+
+/** The text of one content value, whatever shape it takes. Pure. */
+function textOfContent(content: any): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return partsToText(content);
+  if (content && typeof content.text === "string") return content.text;
+  return "";
+}
+
+/** The text of an array of parts. Pure. */
+function partsToText(parts: any[]): string {
+  return parts
+    .filter((c: any) => c && typeof c.text === "string")
+    .map((c: any) => c.text)
+    .join("\n");
+}
+
+/**
+ * The newest assistant text out of a Pi message list. Pure.
+ *
+ * Walks backwards and returns the first message with text, so the newest one
+ * wins.
+ */
 export function lastAssistantText(messages: any[]): string {
   if (!Array.isArray(messages)) return "";
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -63,18 +100,7 @@ export function lastAssistantText(messages: any[]): string {
     if (!m) continue;
     const role = m.role ?? m.info?.role;
     if (role && role !== "assistant") continue;
-    const content = m.content ?? m.parts ?? m.info?.content;
-    let text = "";
-    if (typeof content === "string") {
-      text = content;
-    } else if (Array.isArray(content)) {
-      text = content
-        .filter((c: any) => c && typeof c.text === "string")
-        .map((c: any) => c.text)
-        .join("\n");
-    } else if (content && typeof content.text === "string") {
-      text = content.text;
-    }
+    const text = textOfMessage(m);
     if (text.trim()) return text;
   }
   return "";
@@ -105,31 +131,55 @@ function shouldNudge(
   }
 }
 
+/** The message list of a settle event, under either field name. Pure. */
+function messagesOf(event: any): any[] {
+  return event?.messages ?? event?.entries ?? [];
+}
+
+/** The session id of a settle event. Pure. */
+function sessionIdOf(event: any): string {
+  return String(event?.sessionId ?? event?.session_id ?? "pi");
+}
+
+/**
+ * What to hand back to Pi for one settle event. Pure.
+ *
+ * Returns the continuation payload, or undefined for "do nothing".
+ */
+export function settleResponse(event: any): { continue: true; entries: any[] } | undefined {
+  const text = lastAssistantText(messagesOf(event));
+  if (!text) {
+    reportUnreadableEvent();
+    return undefined;
+  }
+
+  const verdict = shouldNudge(text, sessionIdOf(event));
+  if (!verdict.nudge) return undefined;
+
+  // One extra model request, carrying the nudge as a custom message.
+  return {
+    continue: true,
+    entries: [{ type: "custom_message", content: verdict.nudgeText ?? NUDGE }],
+  };
+}
+
+/**
+ * Say that the event carried no readable text.
+ *
+ * On stderr rather than passing silently, so a Pi API change that renames the
+ * field shows up in the user's log instead of "it just never fires".
+ */
+function reportUnreadableEvent(): void {
+  console.error(
+    "continue-hook(pi): no assistant text in the settle event — " +
+      "Pi may have renamed messages/entries; nothing was evaluated",
+  );
+}
+
 export default function continueHookPiExtension(pi: any) {
   pi.on("agent_before_settle", (event: any) => {
     try {
-      const messages: any[] = event?.messages ?? event?.entries ?? [];
-      const text = lastAssistantText(messages);
-      if (!text) {
-        // No readable assistant text in this event: nothing to judge. Say so on
-        // stderr rather than passing silently, so a Pi API change that renames
-        // the field shows up in the user's log instead of "it just never fires".
-        console.error(
-          "continue-hook(pi): no assistant text in the settle event — " +
-            "Pi may have renamed messages/entries; nothing was evaluated",
-        );
-        return undefined;
-      }
-
-      const sessionId = String(event?.sessionId ?? event?.session_id ?? "pi");
-      const verdict = shouldNudge(text, sessionId);
-      if (!verdict.nudge) return undefined;
-
-      // One extra model request, carrying the nudge as a custom message.
-      return {
-        continue: true,
-        entries: [{ type: "custom_message", content: verdict.nudgeText ?? NUDGE }],
-      };
+      return settleResponse(event);
     } catch {
       return undefined; // fail open
     }

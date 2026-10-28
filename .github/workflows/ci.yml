@@ -25,6 +25,7 @@ jobs:
           python-version: "3.12"
       - name: Install tools
         run: python -m pip install --upgrade pip ruff mypy
+      # ruff check includes C901 (cyclomatic complexity, ceiling 10).
       - name: ruff check
         run: ruff check .
       - name: ruff format --check
@@ -42,6 +43,7 @@ jobs:
           node-version: "22"
       - name: Install lint tooling
         run: npm install --no-package-lock --no-audit --no-fund
+      # eslint includes the complexity rule (ceiling 10) for the shipped JS/TS.
       - name: eslint
         run: npx eslint .
       - name: prettier

@@ -384,6 +384,65 @@ def decide(
         )
 
 
+# Reasons that mean "this turn really ended" — the next user turn starts from
+# zero. Everything else (a cap, a cooldown, an empty reply) must keep the chain
+# open: resetting there let 8 identical stop events produce 6 nudges with
+# max_nudges_per_turn: 2.
+CLOSING_REASONS = frozenset({"no_trigger", "boundary", "user_must"})
+
+
+def _cap_reason(
+    cfg: dict[str, Any],
+    *,
+    attempt: int,
+    total: int,
+    chain_open: bool,
+    last_ts: float,
+    now: float,
+) -> str | None:
+    """Which cap (if any) stops this nudge. Pure: no state, no clock, no I/O.
+
+    Returns the reason code, or None when the nudge may go ahead.
+    """
+    if chain_open:
+        max_per_turn = int(_num(cfg.get("max_nudges_per_turn", 2), 2, integer=True))
+        if attempt >= max_per_turn:
+            return "max_nudges"
+    max_per_session = int(_num(cfg.get("max_nudges_per_session", 20), 20, integer=True))
+    if total >= max_per_session:
+        return "max_nudges_per_session"
+    cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
+    if cooldown > 0 and total > 0 and now - last_ts < cooldown:
+        return "cooldown"
+    return None
+
+
+def _record_outcome(
+    entry: dict[str, Any],
+    *,
+    state: dict[str, Any],
+    state_path: Path,
+    nudge: bool,
+    reason: str,
+    attempt: int,
+    total: int,
+    now: float,
+) -> None:
+    """Update the session's counters and persist the state file."""
+    if nudge:
+        entry["count"] = attempt + 1
+        entry["total"] = total + 1
+        entry["last_ts"] = now
+        entry["chain"] = True
+    elif reason in CLOSING_REASONS:
+        # The turn ended without a nudge — close the chain.
+        entry["count"] = 0
+        entry["chain"] = False
+    # else: leave the chain (and the per-turn counter) exactly as it was.
+    state["version"] = STATE_VERSION
+    write_state(state, state_path)
+
+
 def _decide_locked(
     text: str,
     *,
@@ -409,25 +468,17 @@ def _decide_locked(
     total = int(_num(entry.get("total", 0), 0, integer=True))
     snippet = (text or "")[-160:]
 
-    # Reasons that mean "this turn really ended" — the next user turn starts
-    # from zero. Everything else (a cap, a cooldown, an empty reply) must keep
-    # the chain open: resetting there let 8 identical stop events produce 6
-    # nudges with max_nudges_per_turn: 2.
-    closing_reasons = {"no_trigger", "boundary", "user_must"}
-
     def finish(nudge: bool, reason: str) -> Decision:
-        if nudge:
-            entry["count"] = attempt + 1
-            entry["total"] = total + 1
-            entry["last_ts"] = now
-            entry["chain"] = True
-        elif reason in closing_reasons:
-            # The turn ended without a nudge — close the chain.
-            entry["count"] = 0
-            entry["chain"] = False
-        # else: leave the chain (and the per-turn counter) exactly as it was.
-        state["version"] = STATE_VERSION
-        write_state(state, state_path)
+        _record_outcome(
+            entry,
+            state=state,
+            state_path=state_path,
+            nudge=nudge,
+            reason=reason,
+            attempt=attempt,
+            total=total,
+            now=now,
+        )
         log_event(
             {
                 "session": session_id,
@@ -458,23 +509,19 @@ def _decide_locked(
     # chain even when the per-turn cap is already reached, or the chain stays
     # open forever and that session never nudges again — which is what checking
     # the cap first did to hermes / opencode / pi / dsh / cursor.
-    if reason in closing_reasons:
+    if reason in CLOSING_REASONS:
         return finish(False, reason)
 
-    if chain_open:
-        max_per_turn = int(_num(cfg.get("max_nudges_per_turn", 2), 2, integer=True))
-        if attempt >= max_per_turn:
-            return finish(False, "max_nudges")
-    max_per_session = int(_num(cfg.get("max_nudges_per_session", 20), 20, integer=True))
-    if total >= max_per_session:
-        return finish(False, "max_nudges_per_session")
-    cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
-    if (
-        cooldown > 0
-        and total > 0
-        and now - _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cooldown
-    ):
-        return finish(False, "cooldown")
+    capped = _cap_reason(
+        cfg,
+        attempt=attempt,
+        total=total,
+        chain_open=chain_open,
+        last_ts=_num(entry.get("last_ts", 0.0), 0.0, integer=False),
+        now=now,
+    )
+    if capped:
+        return finish(False, capped)
 
     if cfg.get("dry_run"):
         return finish(False, "dry_run")

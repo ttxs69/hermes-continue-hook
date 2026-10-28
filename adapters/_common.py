@@ -117,8 +117,8 @@ def _record_to_text(record: Any) -> str:
     return text
 
 
-def read_transcript(path: str) -> str:
-    """Return the newest assistant text from a transcript file.
+def parse_transcript(raw: str) -> str:
+    """The newest assistant text in a transcript's text. Pure.
 
     Tolerates the three shapes seen in the wild:
       * JSONL, Claude-style  ``{"type":"assistant","message":{"content":[…]}}``
@@ -126,6 +126,47 @@ def read_transcript(path: str) -> str:
       * a single JSON array of message objects
 
     Unknown shapes yield "" — the caller then skips the turn (fail open).
+    """
+    stripped = raw.strip()
+    if not stripped:
+        return ""
+
+    records = _records_of(stripped)
+    last = ""
+    for record in records:
+        text = _record_to_text(record)
+        if text.strip():
+            last = text
+    return last
+
+
+def _records_of(stripped: str) -> list[Any]:
+    """The records in a transcript's text. Pure."""
+    if stripped[0] == "[":
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+    records: list[Any] = []
+    for line in stripped.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def read_transcript(path: str) -> str:
+    """Read a transcript file and return the newest assistant text.
+
+    The file is the shell's business; the parsing is :func:`parse_transcript`'s.
     """
     if not path:
         return ""
@@ -136,36 +177,7 @@ def read_transcript(path: str) -> str:
         raw = file_path.read_text(encoding="utf-8", errors="replace")
         if len(raw) > MAX_TRANSCRIPT_BYTES:
             raw = raw[-MAX_TRANSCRIPT_BYTES:]
-        stripped = raw.strip()
-        if not stripped:
-            return ""
-
-        records: list[Any] = []
-        if stripped[0] == "[":
-            try:
-                parsed = json.loads(stripped)
-                if isinstance(parsed, list):
-                    records = parsed
-            except Exception:
-                records = []
-        if not records:
-            for line in stripped.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(record, dict):
-                    records.append(record)
-
-        last = ""
-        for record in records:
-            text = _record_to_text(record)
-            if text.strip():
-                last = text
-        return last
+        return parse_transcript(raw)
     except Exception:
         return ""
 

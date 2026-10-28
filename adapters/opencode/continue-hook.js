@@ -92,47 +92,82 @@ export function lastAssistantText(messages) {
   return "";
 }
 
-/** Send the nudge back into the session (v2 client first, v1 as fallback). */
+/**
+ * Send the nudge back into the session (v2 client first, v1 as fallback).
+ *
+ * The two calls differ only in the argument shape, so the choice of which to
+ * try first is data, not a branch in the middle of the flow.
+ */
+const PROMPT_SHAPES = [
+  (sessionId, text) => ({ sessionID: sessionId, parts: [{ type: "text", text }] }),
+  (sessionId, text) => ({
+    path: { id: sessionId },
+    body: { parts: [{ type: "text", text }] },
+  }),
+];
+
 async function promptSession(client, sessionId, text) {
-  try {
-    await client.session.prompt({ sessionID: sessionId, parts: [{ type: "text", text }] });
-    return true;
-  } catch {
+  for (const shape of PROMPT_SHAPES) {
     try {
-      await client.session.prompt({
-        path: { id: sessionId },
-        body: { parts: [{ type: "text", text }] },
-      });
+      await client.session.prompt(shape(sessionId, text));
       return true;
     } catch {
-      return false;
+      // Try the next shape.
     }
   }
+  return false;
+}
+
+/**
+ * The session id of an idle event. Pure: reads the event.
+ */
+export function sessionIdOf(event) {
+  return event?.properties?.sessionID || event?.properties?.info?.id || "";
+}
+
+/**
+ * The messages of a session, trying the v2 shape first and the v1 shape second.
+ */
+async function fetchMessages(client, sessionId) {
+  const shapes = [
+    () => client.session.messages({ path: { id: sessionId } }),
+    () => client.session.messages({ sessionID: sessionId }),
+  ];
+  for (const shape of shapes) {
+    try {
+      return await shape();
+    } catch {
+      // Try the next shape.
+    }
+  }
+  return null;
+}
+
+/**
+ * What to do for one idle event, given the reply text. Pure.
+ *
+ * The verdict and the reason are decided here; sending the nudge is not.
+ */
+export function idleVerdict(text, sessionId) {
+  if (!text) return { nudged: false, reason: "empty" };
+  const verdict = shouldNudge(text, sessionId);
+  if (!verdict.nudge) return { nudged: false, reason: verdict.reason };
+  return { nudged: true, reason: "nudged", nudgeText: verdict.nudgeText || NUDGE };
 }
 
 export async function handleIdle(client, event) {
-  const sessionId = event?.properties?.sessionID || event?.properties?.info?.id || "";
+  const sessionId = sessionIdOf(event);
   if (!sessionId) return { nudged: false, reason: "no_session" };
   // No local debounce: the engine records every evaluation and its per-turn
   // cap is what prevents a double nudge. Keeping a private 1.5 s window here
   // meant a skipped evaluation left no trace, so the event log could not be
   // used as the denominator.
-  let messages;
-  try {
-    messages = await client.session.messages({ path: { id: sessionId } });
-  } catch {
-    try {
-      messages = await client.session.messages({ sessionID: sessionId });
-    } catch {
-      return { nudged: false, reason: "no_messages" };
-    }
-  }
-  const text = lastAssistantText(messages);
-  if (!text) return { nudged: false, reason: "empty" };
+  const messages = await fetchMessages(client, sessionId);
+  if (!messages) return { nudged: false, reason: "no_messages" };
 
-  const verdict = shouldNudge(text, sessionId);
-  if (!verdict.nudge) return { nudged: false, reason: verdict.reason };
-  const sent = await promptSession(client, sessionId, verdict.nudgeText || NUDGE);
+  const decision = idleVerdict(lastAssistantText(messages), sessionId);
+  if (!decision.nudged) return { nudged: false, reason: decision.reason };
+  const sent = await promptSession(client, sessionId, decision.nudgeText);
   return { nudged: sent, reason: sent ? "nudged" : "prompt_failed" };
 }
 

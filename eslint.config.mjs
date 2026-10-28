@@ -83,6 +83,21 @@ export default tseslint.config(
     },
   },
   {
+    // Cyclomatic complexity ceiling.
+    //
+    // Measured before the gate went in: 47 (the installer's main), 21 (the
+    // uninstall), 17 (the config reader), 16 (the hook patcher). Every one of
+    // them was a decision table, a parse, or a per-kind dispatch written as a
+    // chain of branches. The fix was to move the decision into a pure
+    // function and leave the shell to carry it out — not to sprinkle
+    // `eslint-disable` over it.
+    //
+    // The ceiling is 10 and the highest function left in the shipped code is
+    // 9. The headroom is deliberate.
+    files: ["bin/**/*.js", "adapters/**/*.{js,ts}", "scripts/**/*.mjs"],
+    rules: { complexity: ["error", 10] },
+  },
+  {
     files: ["tests/**/*.mjs"],
     rules: {
       // Tests print their own progress.

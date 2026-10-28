@@ -225,6 +225,25 @@ def _int(value: Any, fallback: int) -> int:
     except (TypeError, ValueError):
         return fallback
 
+def strip_code_and_links(text: str) -> str:
+    """Remove code blocks, inline code, links and URLs. Pure.
+
+    Applied to the WHOLE reply before the closing window is taken. Doing it
+    the other way round meant a fenced block whose closing ``` fell outside the
+    last 240 characters left its "?" in place — and "the reply ends with a code
+    block" is one of the most common shapes.
+    """
+    for pattern in (_CODE_BLOCK_RE, _INLINE_CODE_RE, _MARKDOWN_LINK_RE, _URL_RE):
+        text = pattern.sub(" ", text)
+    return text
+
+def _first_trigger_hit(triggers: dict, tail: str) -> str | None:
+    """The name of the first trigger pattern that matches, or None. Pure."""
+    for name in ("offer", "hand_off", "confirm_seek"):
+        if _compile(triggers.get(name)).search(tail):
+            return name
+    return None
+
 def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     """Return ``(should_nudge, reason_code)``. Pure transport layer.
 
@@ -236,14 +255,7 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     if not text or not str(text).strip():
         return False, "empty"
     full = str(text).strip()
-    # Strip code and links from the WHOLE reply, then take the closing window.
-    # Doing it the other way round meant a fenced block whose closing ``` fell
-    # outside the last 240 characters left its "?" in place — and "the reply
-    # ends with a code block" is one of the most common shapes.
-    stripped = _CODE_BLOCK_RE.sub(" ", full)
-    stripped = _INLINE_CODE_RE.sub(" ", stripped)
-    stripped = _MARKDOWN_LINK_RE.sub(" ", stripped)
-    stripped = _URL_RE.sub(" ", stripped)
+    stripped = strip_code_and_links(full)
     tail_chars = _int(cfg.get("tail_chars", 240), 240)
     tail = full[-tail_chars:]
     ex = cfg.get("exclusions", {})
@@ -256,14 +268,12 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     # The closing window of the code-stripped text, so the "?" check only sees
     # punctuation that is actually prose.
     no_urls = _QUOTE_RE.sub("", stripped[-tail_chars:])
-    hit = None
-    for name in ("offer", "hand_off", "confirm_seek"):
-        if _compile(tr.get(name)).search(trig_tail):
-            hit = f"trigger:{name}"
-            break
-    if hit is None and tr.get("question_mark", True) and re.search(r"[？?]", no_urls):
+    name = _first_trigger_hit(tr, trig_tail)
+    if name is not None:
+        hit = f"trigger:{name}"
+    elif tr.get("question_mark", True) and re.search(r"[？?]", no_urls):
         hit = "trigger:question_mark"
-    if hit is None:
+    else:
         # The turn ended cleanly — say so even when the cap is already reached.
         return False, "no_trigger"
     if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
@@ -598,6 +608,62 @@ def decide(
             platform=platform,
         )
 
+# Reasons that mean "this turn really ended" — the next user turn starts from
+# zero. Everything else (a cap, a cooldown, an empty reply) must keep the chain
+# open: resetting there let 8 identical stop events produce 6 nudges with
+# max_nudges_per_turn: 2.
+CLOSING_REASONS = frozenset({"no_trigger", "boundary", "user_must"})
+
+def _cap_reason(
+    cfg: dict[str, Any],
+    *,
+    attempt: int,
+    total: int,
+    chain_open: bool,
+    last_ts: float,
+    now: float,
+) -> str | None:
+    """Which cap (if any) stops this nudge. Pure: no state, no clock, no I/O.
+
+    Returns the reason code, or None when the nudge may go ahead.
+    """
+    if chain_open:
+        max_per_turn = int(_num(cfg.get("max_nudges_per_turn", 2), 2, integer=True))
+        if attempt >= max_per_turn:
+            return "max_nudges"
+    max_per_session = int(_num(cfg.get("max_nudges_per_session", 20), 20, integer=True))
+    if total >= max_per_session:
+        return "max_nudges_per_session"
+    cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
+    if cooldown > 0 and total > 0 and now - last_ts < cooldown:
+        return "cooldown"
+    return None
+
+def _record_outcome(
+    entry: dict[str, Any],
+    *,
+    state: dict[str, Any],
+    state_path: Path,
+    nudge: bool,
+    reason: str,
+    attempt: int,
+    total: int,
+    now: float,
+) -> None:
+    """Update the session's counters and persist the state file."""
+    if nudge:
+        entry["count"] = attempt + 1
+        entry["total"] = total + 1
+        entry["last_ts"] = now
+        entry["chain"] = True
+    elif reason in CLOSING_REASONS:
+        # The turn ended without a nudge — close the chain.
+        entry["count"] = 0
+        entry["chain"] = False
+    # else: leave the chain (and the per-turn counter) exactly as it was.
+    state["version"] = STATE_VERSION
+    write_state(state, state_path)
+
 def _decide_locked(
     text: str,
     *,
@@ -623,25 +689,17 @@ def _decide_locked(
     total = int(_num(entry.get("total", 0), 0, integer=True))
     snippet = (text or "")[-160:]
 
-    # Reasons that mean "this turn really ended" — the next user turn starts
-    # from zero. Everything else (a cap, a cooldown, an empty reply) must keep
-    # the chain open: resetting there let 8 identical stop events produce 6
-    # nudges with max_nudges_per_turn: 2.
-    closing_reasons = {"no_trigger", "boundary", "user_must"}
-
     def finish(nudge: bool, reason: str) -> Decision:
-        if nudge:
-            entry["count"] = attempt + 1
-            entry["total"] = total + 1
-            entry["last_ts"] = now
-            entry["chain"] = True
-        elif reason in closing_reasons:
-            # The turn ended without a nudge — close the chain.
-            entry["count"] = 0
-            entry["chain"] = False
-        # else: leave the chain (and the per-turn counter) exactly as it was.
-        state["version"] = STATE_VERSION
-        write_state(state, state_path)
+        _record_outcome(
+            entry,
+            state=state,
+            state_path=state_path,
+            nudge=nudge,
+            reason=reason,
+            attempt=attempt,
+            total=total,
+            now=now,
+        )
         log_event(
             {
                 "session": session_id,
@@ -672,23 +730,19 @@ def _decide_locked(
     # chain even when the per-turn cap is already reached, or the chain stays
     # open forever and that session never nudges again — which is what checking
     # the cap first did to hermes / opencode / pi / dsh / cursor.
-    if reason in closing_reasons:
+    if reason in CLOSING_REASONS:
         return finish(False, reason)
 
-    if chain_open:
-        max_per_turn = int(_num(cfg.get("max_nudges_per_turn", 2), 2, integer=True))
-        if attempt >= max_per_turn:
-            return finish(False, "max_nudges")
-    max_per_session = int(_num(cfg.get("max_nudges_per_session", 20), 20, integer=True))
-    if total >= max_per_session:
-        return finish(False, "max_nudges_per_session")
-    cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
-    if (
-        cooldown > 0
-        and total > 0
-        and now - _num(entry.get("last_ts", 0.0), 0.0, integer=False) < cooldown
-    ):
-        return finish(False, "cooldown")
+    capped = _cap_reason(
+        cfg,
+        attempt=attempt,
+        total=total,
+        chain_open=chain_open,
+        last_ts=_num(entry.get("last_ts", 0.0), 0.0, integer=False),
+        now=now,
+    )
+    if capped:
+        return finish(False, capped)
 
     if cfg.get("dry_run"):
         return finish(False, "dry_run")

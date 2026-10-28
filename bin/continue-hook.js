@@ -155,58 +155,167 @@ const describeError = (err) =>
 const errorCode = (err) =>
   err && typeof err === "object" && "code" in err ? String(err.code) : "";
 
+/** A usage error: the command line is wrong. The shell turns it into exit 2. */
+class UsageError extends Error {}
+
+/** Split a --host value into host names. */
+const parseHostList = (value) =>
+  value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+const KNOWN_COMMANDS = new Set(["install", "uninstall", "check", "doctor", "help"]);
+
+/** The flags that only switch something on. */
+const SIMPLE_FLAGS = {
+  "--dry-run": "dryRun",
+  "--json": "json",
+  "-h": "help",
+  "--help": "help",
+};
+
+/** Apply a boolean flag. */
+const applySimpleFlag = (opts, flag) => {
+  if (flag === "help") opts.command = "help";
+  else opts[flag] = true;
+};
+
+/**
+ * Parse the command line. Pure: returns options, or throws UsageError.
+ *
+ * The parser never calls process.exit and never prints. That is what makes it
+ * testable — a bad flag is a returned error, not a killed process.
+ */
+/**
+ * The flags that take a value. A table, not a chain of ifs: the parser's
+ * complexity comes from having one branch per flag, and a table has none.
+ */
+const VALUE_FLAGS = new Set(["--host", "-H"]);
+
+/** Parse the command line. Pure: returns options, or throws UsageError. */
+/**
+ * Parse the command line. Pure: returns options, or throws UsageError.
+ *
+ * The flags are a table, not a chain of ifs: a chain costs one complexity
+ * point per flag, and a table costs none. The two flags that need a value get
+ * their own branch; the rest is a lookup.
+ */
 function parseArgs(argv) {
   const opts = { command: "install", hosts: ["all"], dryRun: false };
   const rest = [];
+
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--host" || arg === "-H") {
+
+    if (VALUE_FLAGS.has(arg)) {
       const value = String(argv[++i] || "");
       if (!value.trim()) {
         // `--host` with no value installed nothing while still writing the
         // runtime, and exited 0.
-        console.error("--host needs a value: a comma-separated list, or 'all'");
-        process.exit(2);
+        throw new UsageError("--host needs a value: a comma-separated list, or 'all'");
       }
-      opts.hosts = value
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    } else if (arg.startsWith("--host=")) {
-      opts.hosts = arg
-        .slice(7)
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    } else if (arg === "--dry-run") {
-      opts.dryRun = true;
-    } else if (arg === "--json") {
-      opts.json = true;
-    } else if (arg === "-h" || arg === "--help") {
-      opts.command = "help";
-    } else {
-      rest.push(arg);
+      opts.hosts = parseHostList(value);
+      continue;
     }
+    if (arg.startsWith("--host=")) {
+      opts.hosts = parseHostList(arg.slice(7));
+      continue;
+    }
+    const flag = SIMPLE_FLAGS[arg];
+    if (flag) {
+      applySimpleFlag(opts, flag);
+      continue;
+    }
+    rest.push(arg);
   }
+
   if (rest.length) opts.command = rest[0];
-  const KNOWN = new Set(["install", "uninstall", "check", "doctor", "help"]);
-  if (!KNOWN.has(opts.command)) {
+  if (!KNOWN_COMMANDS.has(opts.command)) {
     // `uninstal` used to fall through to install: a typo pointed the command in
     // the opposite direction.
-    console.error(`unknown command: ${opts.command}\nknown: ${[...KNOWN].join(", ")}`);
-    process.exit(2);
+    throw new UsageError(
+      `unknown command: ${opts.command}\nknown: ${[...KNOWN_COMMANDS].join(", ")}`,
+    );
   }
   // "skills" named by hand means "put the portable skill everywhere"; skills
   // that arrive through "all" only go to hosts this machine actually has.
   opts.skillsExplicit = opts.hosts.includes("skills");
   opts.hostsAll = opts.hosts.includes("all");
   if (opts.hostsAll) opts.hosts = [...HOST_NAMES];
-  const unknown = opts.hosts.filter((h) => !HOSTS[h]);
-  if (unknown.length) {
-    console.error(`unknown host(s): ${unknown.join(", ")}\nknown: ${HOST_NAMES.join(", ")}`);
-    process.exit(2);
-  }
+  assertKnownHosts(opts.hosts);
   return opts;
+}
+
+/** Every host name must be one we know. Throws UsageError otherwise. */
+function assertKnownHosts(hosts) {
+  const unknown = hosts.filter((h) => !HOSTS[h]);
+  if (unknown.length) {
+    throw new UsageError(`unknown host(s): ${unknown.join(", ")}\nknown: ${HOST_NAMES.join(", ")}`);
+  }
+}
+
+/**
+ * Parse a config file's text. Pure: text in, result out, no filesystem.
+ *
+ * The shape of the result is the point of the split:
+ *   { kind: "object", data }   — usable
+ *   { kind: "empty" }          — a blank file, same as {}
+ *   { kind: "broken", reason } — must not be overwritten
+ */
+function parseConfigText(raw) {
+  // A UTF-8 BOM is what Notepad and several Windows tools write; JSON.parse
+  // rejects it, which made install impossible on such a file with a message
+  // blaming a trailing comma.
+  const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+  if (!text.trim()) return { kind: "empty" };
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      // A JSON array parses fine and is still not a config file: writing
+      // `.hooks` onto an array produces a string that silently drops it, so
+      // the install reported success and the hook was never there.
+      return { kind: "broken", reason: "is a JSON array, not a config object" };
+    }
+    return { kind: "object", data: parsed && typeof parsed === "object" ? parsed : {} };
+  } catch (err) {
+    return { kind: "broken", reason: `is not valid JSON (${describeError(err)})` };
+  }
+}
+
+/**
+ * Read a host config.
+ *
+ * A missing file is normal ({}); a file we cannot *parse* is not. Swallowing
+ * the parse error and then writing our version over it destroyed a user's
+ * settings.json — including a JSONC file with comments, which many hosts
+ * accept and JSON.parse does not. Callers get the error so they can refuse.
+ */
+/**
+ * What to do about a config we could not parse.
+ *
+ * Pure: the policy is a value, not a side effect. The shell prints and writes.
+ */
+function brokenConfigAction(mode, file, reason, { dryRun = false } = {}) {
+  if (mode === "ignore") return { kind: "ignore" };
+  if (mode === "skip") {
+    return { kind: "report", message: `✗ ${file} ${reason} — left untouched.` };
+  }
+  // "abort": back the file up before anything else touches it, then say what
+  // happened. One stable backup name: a timestamped one accumulated on every
+  // retry.
+  const backup = `${file}.bak`;
+  const needsBackup = !dryRun && !existsSync(backup);
+  return {
+    kind: "backup",
+    backup,
+    needsBackup,
+    message:
+      `✗ ${file} ${reason}.\n` +
+      `  This host was left untouched` +
+      (dryRun ? "." : ` (original saved as ${backup}).`) +
+      `\n  Fix it (a trailing comma or a // comment is the usual cause) and re-run.`,
+  };
 }
 
 /**
@@ -219,42 +328,20 @@ function parseArgs(argv) {
  */
 function readJson(file, { onBroken = "abort", dryRun = false } = {}) {
   if (!existsSync(file)) return {};
-  let raw = readFileSync(file, "utf8");
-  // A UTF-8 BOM is what Notepad and several Windows tools write; JSON.parse
-  // rejects it, which made install impossible on such a file with a message
-  // blaming a trailing comma.
-  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
-  if (!raw.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      // A JSON array parses fine and is still not a config file: writing
-      // `.hooks` onto an array produces a string that silently drops it, so
-      // the install reported success and the hook was never there.
-      if (onBroken === "ignore") return {};
-      console.error(`✗ ${file} is a JSON array, not a config object — left untouched.`);
-      return null;
-    }
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch (err) {
-    // "skip" — the caller decides what to do, and nothing is written here.
-    if (onBroken === "skip") {
-      console.error(`✗ ${file} is not valid JSON (${describeError(err)}) — left untouched.`);
-      return null;
-    }
-    // "ignore" — a read-only caller (check) just reports the file as not ours.
-    if (onBroken === "ignore") return {};
-    // One stable backup name: a timestamped one accumulated on every retry.
-    const backup = `${file}.bak`;
-    if (!dryRun && !existsSync(backup)) writeFileSync(backup, raw, "utf8");
-    console.error(
-      `✗ ${file} is not valid JSON (${describeError(err)}).\n` +
-        `  This host was left untouched` +
-        (dryRun ? "." : ` (original saved as ${backup}).`) +
-        `\n  Fix it (a trailing comma or a // comment is the usual cause) and re-run.`,
-    );
+  const raw = readFileSync(file, "utf8");
+  const result = parseConfigText(raw);
+  if (result.kind === "object") return result.data;
+  if (result.kind === "empty") return {};
+
+  const action = brokenConfigAction(onBroken, file, result.reason, { dryRun });
+  if (action.kind === "ignore") return {};
+  if (action.kind === "report") {
+    console.error(action.message);
     return null;
   }
+  if (action.needsBackup) writeFileSync(action.backup, raw, "utf8");
+  console.error(action.message);
+  return null;
 }
 
 function writeJson(file, data) {
@@ -319,46 +406,56 @@ const skillTargetDirs = () => {
   return present;
 };
 
-/** Host directories this tool has actually written a hook into. */
-const installedHosts = () => {
-  const out = [];
-  for (const host of HOST_NAMES) {
-    const def = HOSTS[host];
-    // file / dsh / skills do not live in a JSON hook list, but they still use
-    // the shared runtime: the Pi and OpenCode extensions locate hookctl.py
-    // inside ~/.hermes/continue-hook/. Skipping them here let a single-host
-    // uninstall delete the runtime that other installed hosts were running on.
-    if (def.kind === "skills") {
-      if (SKILL_DIRS.some((d) => isOurFile(path.join(expand(d), "continue-hook", "SKILL.md"))))
-        out.push(host);
-      continue;
-    }
-    if (def.kind === "file") {
-      // A user's own extension at that path is not ours; deleting it would be
-      // the same data loss as the JSON-hook bug.
-      if (isOurFile(expand(def.target))) out.push(host);
-      continue;
-    }
-    if (def.kind === "dsh") {
-      if (isOurFile(path.join(expand(def.target), "package.json"))) out.push(host);
-      continue;
-    }
-    const data = readJson(expand(def.config), { onBroken: "ignore" });
-    const key =
-      def.kind === "cursor-stop"
-        ? "stop"
-        : def.kind === "copilot-stop"
-          ? "agentStop"
-          : def.kind === "gemini-after"
-            ? "AfterAgent"
-            : "Stop";
-    const list = data?.hooks?.[key];
-    if (!Array.isArray(list)) continue;
-    if (list.some((g) => isOurs(g) || (Array.isArray(g?.hooks) && g.hooks.some(isOurs))))
-      out.push(host);
+/**
+ * True when a host's config contains one of our hook entries.
+ *
+ * Pure with respect to the config: it reads the object it is given.
+ */
+function configHasOurHook(data, kind) {
+  const list = data?.hooks?.[hookKeyFor(kind)];
+  if (!Array.isArray(list)) return false;
+  // Not a substring match: a user's own ~/bin/continue-hook-backup.sh made
+  // `check` report an install that did not exist.
+  return list.some((g) => isOurs(g) || (Array.isArray(g?.hooks) && g.hooks.some(isOurs)));
+}
+
+/**
+ * The file that proves a host holds our copy — the one thing a host of each
+ * kind has in common. Null for the skills layer, which has many.
+ *
+ * The same question was asked three times ("is this host installed?", "what do
+ * we remove?", "what do we write?") and each answer was a separate if-chain
+ * over `kind`. They drifted: `installedHosts` and `checkHost` each carried
+ * their own copy of the hook key, and one of them fell out of date. One
+ * function, one answer.
+ */
+function markerPathFor(def) {
+  if (def.kind === "file") return expand(def.target);
+  if (def.kind === "dsh") return path.join(expand(def.target), "package.json");
+  return null;
+}
+
+/** The skill files we would have written, for the portable layer. */
+const skillMarkerPaths = () =>
+  SKILL_DIRS.map((dir) => path.join(expand(dir), "continue-hook", "SKILL.md"));
+
+/**
+ * True when this host holds our copy. One answer per kind, shared by
+ * `installedHosts`, `checkHost` and the uninstall path.
+ */
+function hostIsInstalled(def) {
+  if (def.kind === "skills") {
+    return skillMarkerPaths().some((p) => isOurFile(p));
   }
-  return out;
-};
+  const marker = markerPathFor(def);
+  if (marker) return isOurFile(marker);
+  // JSON-config hosts: the evidence is an entry in their config file.
+  const data = readJson(expand(def.config), { onBroken: "ignore" });
+  return configHasOurHook(data, def.kind);
+}
+
+/** Host directories this tool has actually written a hook into. */
+const installedHosts = () => HOST_NAMES.filter((host) => hostIsInstalled(HOSTS[host]));
 
 const isOurs = (entry) => {
   const cmd = commandOf(entry);
@@ -379,24 +476,7 @@ const isOurs = (entry) => {
 };
 
 /** Replace our own hook entry inside a host config, keeping everything else. */
-/**
- * Reasons a config cannot safely be patched. Returned instead of throwing so a
- * single bad host cannot stop the others.
- */
-function configShapeProblem(data, kind) {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return "not a JSON object";
-  if (data.hooks === undefined) return null;
-  if (data.hooks === null || typeof data.hooks !== "object" || Array.isArray(data.hooks)) {
-    return "`hooks` is not an object";
-  }
-  const key = hookKeyFor(kind);
-  const existing = data.hooks[key];
-  if (existing !== undefined && !Array.isArray(existing) && typeof existing !== "object") {
-    return `hooks.${key} is not an array or an object`;
-  }
-  return null;
-}
-
+/** The key a host keeps its hooks under. */
 const hookKeyFor = (kind) =>
   kind === "cursor-stop"
     ? "stop"
@@ -405,6 +485,91 @@ const hookKeyFor = (kind) =>
       : kind === "gemini-after"
         ? "AfterAgent"
         : "Stop";
+
+/**
+ * Reasons a config cannot safely be patched. Returned instead of throwing so a
+ * single bad host cannot stop the others.
+ */
+function configShapeProblem(data, kind) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return "not a JSON object";
+  const hooksProblem = hooksShapeProblem(data.hooks);
+  if (hooksProblem) return hooksProblem;
+  // No `hooks` member at all is a normal empty config: there is nothing to
+  // check, and the install creates the member.
+  if (data.hooks === undefined) return null;
+  const key = hookKeyFor(kind);
+  const existing = data.hooks[key];
+  if (existing !== undefined && !Array.isArray(existing) && typeof existing !== "object") {
+    return `hooks.${key} is not an array or an object`;
+  }
+  return null;
+}
+
+/**
+ * The shape of the `hooks` member, if it is one we cannot patch. Pure.
+ *
+ * `undefined` means "no hooks yet", which is a normal empty config.
+ */
+function hooksShapeProblem(hooks) {
+  if (hooks === undefined) return null;
+  if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks)) {
+    return "`hooks` is not an object";
+  }
+  return null;
+}
+
+/**
+ * The hook entries in a list that are NOT ours. Pure.
+ *
+ * Two shapes appear in the wild:
+ *   * a group of hooks — {"hooks": [...]} (Claude Code, Gemini)
+ *   * a flat entry    — {"command": "..."} (Cursor), {"type","bash"} (Copilot)
+ *
+ * A flat entry belongs to the user, and dropping it would delete somebody
+ * else's configuration. A group is kept only if it still has something in it
+ * after our own entries are taken out.
+ */
+function keepForeignEntries(list) {
+  const kept = [];
+  for (const group of list) {
+    if (isOurs(group)) continue;
+    if (Array.isArray(group?.hooks)) {
+      const entries = group.hooks.filter((h) => !isOurs(h));
+      if (entries.length) kept.push({ ...group, hooks: entries });
+    } else {
+      kept.push(group);
+    }
+  }
+  return kept;
+}
+
+/**
+ * The hook entry a host expects. Pure: kind + command in, entry out.
+ *
+ * Each host has its own shape, and getting it wrong means the host silently
+ * ignores the hook — a file that parses, a hook that never runs.
+ */
+function hookEntryFor(kind, hookCmd) {
+  if (kind === "cursor-stop") {
+    return { command: hookCmd, loop_limit: 5 };
+  }
+  if (kind === "copilot-stop") {
+    return {
+      type: "command",
+      bash: hookCmd,
+      // Copilot reads `bash` on POSIX and `powershell` on Windows; a bash-only
+      // entry silently does nothing there.
+      powershell: hookCmd,
+      timeoutSec: 30,
+    };
+  }
+  if (kind === "gemini-after") {
+    return {
+      hooks: [{ name: "continue-hook", type: "command", command: hookCmd, timeout: 30000 }],
+    };
+  }
+  return { hooks: [{ type: "command", command: hookCmd, timeout: 30 }] };
+}
 
 function patchHooks(data, kind, hookCmd) {
   const hooks = (data.hooks ||= {});
@@ -418,19 +583,7 @@ function patchHooks(data, kind, hookCmd) {
       ? [existing]
       : [];
 
-  const kept = [];
-  for (const group of list) {
-    if (isOurs(group)) continue;
-    if (Array.isArray(group?.hooks)) {
-      // Claude-Code-shaped entry: a group of hooks.
-      const entries = group.hooks.filter((h) => !isOurs(h));
-      if (entries.length) kept.push({ ...group, hooks: entries });
-    } else {
-      // Flat entry (Cursor: {command}, Copilot: {type, bash}) — the user's
-      // own hook. Dropping these would delete somebody else's configuration.
-      kept.push(group);
-    }
-  }
+  const kept = keepForeignEntries(list);
 
   // Cursor and Copilot both require a top-level `version`; a file without it
   // is rejected whole, so the hook we just wrote would never load.
@@ -438,49 +591,17 @@ function patchHooks(data, kind, hookCmd) {
     if (typeof data.version !== "number") data.version = 1;
   }
 
-  if (kind === "cursor-stop") {
-    kept.push({ command: hookCmd, loop_limit: 5 });
-  } else if (kind === "copilot-stop") {
-    kept.push({
-      type: "command",
-      bash: hookCmd,
-      // Copilot reads `bash` on POSIX and `powershell` on Windows; a bash-only
-      // entry silently does nothing there.
-      powershell: hookCmd,
-      timeoutSec: 30,
-    });
-  } else if (kind === "gemini-after") {
-    kept.push({
-      hooks: [{ name: "continue-hook", type: "command", command: hookCmd, timeout: 30000 }],
-    });
-  } else {
-    kept.push({ hooks: [{ type: "command", command: hookCmd, timeout: 30 }] });
-  }
+  kept.push(hookEntryFor(kind, hookCmd));
   hooks[key] = kept;
   return data;
 }
 
+/** Remove our hook entries from a config, leaving everything else alone. */
 function removeOurs(data, kind) {
   if (!data.hooks) return data;
-  const key =
-    kind === "cursor-stop"
-      ? "stop"
-      : kind === "copilot-stop"
-        ? "agentStop"
-        : kind === "gemini-after"
-          ? "AfterAgent"
-          : "Stop";
+  const key = hookKeyFor(kind);
   const list = Array.isArray(data.hooks[key]) ? data.hooks[key] : [];
-  const kept = [];
-  for (const group of list) {
-    if (isOurs(group)) continue;
-    if (Array.isArray(group?.hooks)) {
-      const entries = group.hooks.filter((h) => !isOurs(h));
-      if (entries.length) kept.push({ ...group, hooks: entries });
-    } else {
-      kept.push(group);
-    }
-  }
+  const kept = keepForeignEntries(list);
   if (kept.length) data.hooks[key] = kept;
   else delete data.hooks[key];
   if (Object.keys(data.hooks).length === 0) delete data.hooks;
@@ -567,86 +688,69 @@ function installRuntime(opts) {
   }
 }
 
-function installHost(host, opts) {
-  const def = HOSTS[host];
-  const results = [];
-
+/**
+ * The files a host needs from this package, and where they go.
+ *
+ * Pure: kind + options in, a list of {from, to} out. The copy itself is the
+ * shell's job — this says *what*, never *how*.
+ */
+function installPlanFor(def, opts) {
   if (def.kind === "skills") {
-    for (const dir of opts.skillsExplicit ? SKILL_DIRS : skillTargetDirs()) {
-      const target = path.join(expand(dir), "continue-hook", "SKILL.md");
-      const ok = copyFile(
-        path.join(PKG_ROOT, "skills", "continue-hook", "SKILL.md"),
-        target,
-        opts.dryRun,
-      ).ok;
-      results.push({ path: target, ok });
-    }
-    return { status: "ok", results };
+    const dirs = opts.skillsExplicit ? SKILL_DIRS : skillTargetDirs();
+    return dirs.map((dir) => ({
+      from: path.join(PKG_ROOT, "skills", "continue-hook", "SKILL.md"),
+      to: path.join(expand(dir), "continue-hook", "SKILL.md"),
+    }));
   }
-
   if (def.kind === "file") {
-    const target = expand(def.target);
-    const ok = copyFile(path.join(PKG_ROOT, def.source), target, opts.dryRun).ok;
-    results.push({ path: target, ok });
-    return { status: "ok", results };
+    return [{ from: path.join(PKG_ROOT, def.source), to: expand(def.target) }];
   }
-
   if (def.kind === "dsh") {
     const target = expand(def.target);
-    // The whole dsh directory is ours once its package.json carries the marker,
-    // so its support files are copied without the "is this ours" dance.
-    const ours = isOurFile(path.join(target, "package.json"));
-    for (const file of ["src/index.ts", "package.json", "cordis.patch.yml", "tsconfig.json"]) {
-      results.push({
-        path: path.join(target, file),
-        ok: copyFile(
-          path.join(PKG_ROOT, "adapters", "dsh", file),
-          path.join(target, file),
-          opts.dryRun,
-          { own: ours },
-        ).ok,
-      });
-    }
-    results.push({
-      path: path.join(target, "hookctl.py"),
-      ok: copyFile(
-        path.join(PKG_ROOT, "hookctl.py"),
-        path.join(target, "hookctl.py"),
-        opts.dryRun,
-        { own: true },
-      ).ok,
-    });
-    results.push({
-      path: path.join(target, "detector.py"),
-      ok: copyFile(
-        path.join(PKG_ROOT, "detector.py"),
-        path.join(target, "detector.py"),
-        opts.dryRun,
-        { own: true },
-      ).ok,
-    });
-    return { status: "ok", results };
+    return [
+      ...["src/index.ts", "package.json", "cordis.patch.yml", "tsconfig.json"].map((file) => ({
+        from: path.join(PKG_ROOT, "adapters", "dsh", file),
+        to: path.join(target, file),
+      })),
+      { from: path.join(PKG_ROOT, "hookctl.py"), to: path.join(target, "hookctl.py") },
+      { from: path.join(PKG_ROOT, "detector.py"), to: path.join(target, "detector.py") },
+    ];
   }
+  return [];
+}
 
-  // JSON-config hosts
+/** Install the portable skill layer, the extension files, or the dsh package. */
+function installFilesystemHost(def, opts) {
+  const plan = installPlanFor(def, opts);
+  // The whole dsh directory is ours once its package.json carries the marker,
+  // so its support files are copied without the "is this ours" dance.
+  const own = def.kind === "dsh" ? isOurFile(path.join(expand(def.target), "package.json")) : false;
+  const results = plan.map((step) => ({
+    path: step.to,
+    ok: copyFile(step.from, step.to, opts.dryRun, { own }).ok,
+  }));
+  return { status: "ok", results };
+}
+
+/** Patch a JSON-config host so it loads our hook. */
+function installJsonHost(def, opts) {
   const configPath = expand(def.config);
   const data = readJson(configPath, { dryRun: opts.dryRun });
   if (data === null) {
     // One unparsable config must not abort the other hosts: it is skipped, the
     // user is told, and the run ends with a non-zero status.
-    return { status: "skipped", reason: "unparsable config", results };
+    return { status: "skipped", reason: "unparsable config", results: [] };
   }
   const problem = configShapeProblem(data, def.kind);
   if (problem) {
-    return { status: "skipped", reason: problem, results };
+    return { status: "skipped", reason: problem, results: [] };
   }
-  const hookCmd = hookCommand(def.hook);
-  const patched = patchHooks(data, def.kind, hookCmd);
+  const patched = patchHooks(data, def.kind, hookCommand(def.hook));
   // Whatever we hand the host has to survive serialisation — patching a shape
   // we did not anticipate used to produce text without our hook in it, and the
   // install still reported success.
   if (!JSON.stringify(patched).includes("stop_hook.py")) {
-    return { status: "failed", reason: "the patched config would lose our hook", results };
+    return { status: "failed", reason: "the patched config would lose our hook", results: [] };
   }
   try {
     if (!opts.dryRun) writeJson(configPath, patched);
@@ -656,70 +760,94 @@ function installHost(host, opts) {
     return {
       status: "failed",
       reason: `cannot write (${errorCode(err) || describeError(err)})`,
-      results,
+      results: [],
     };
   }
-  results.push({ path: configPath, ok: true });
+  return { status: "ok", results: [{ path: configPath, ok: true }] };
+}
+
+function installHost(host, opts) {
+  const def = HOSTS[host];
+  if (def.kind === "skills" || def.kind === "file" || def.kind === "dsh") {
+    return installFilesystemHost(def, opts);
+  }
+  return installJsonHost(def, opts);
+}
+
+/** Remove the portable skill layer. */
+function uninstallSkillsHost(opts) {
+  const results = [];
+  for (const dir of SKILL_DIRS) {
+    const target = path.join(expand(dir), "continue-hook");
+    const skill = path.join(target, "SKILL.md");
+    if (!existsSync(skill)) continue;
+    // A skill directory the user wrote is not ours to delete.
+    if (!isOurFile(skill)) {
+      console.error(`! ${skill} was not written by continue-hook — left alone`);
+      results.push({ path: `${skill} (not ours)`, ok: true });
+      continue;
+    }
+    if (!opts.dryRun) rmSync(target, { recursive: true, force: true });
+    results.push({ path: skill, ok: true });
+  }
   return { status: "ok", results };
 }
 
-function uninstallHost(host, opts) {
-  const def = HOSTS[host];
-  const results = [];
-
-  if (def.kind === "skills") {
-    for (const dir of SKILL_DIRS) {
-      const target = path.join(expand(dir), "continue-hook");
-      const skill = path.join(target, "SKILL.md");
-      if (!existsSync(skill)) continue;
-      // A skill directory the user wrote is not ours to delete.
-      if (!isOurFile(skill)) {
-        console.error(`! ${skill} was not written by continue-hook — left alone`);
-        results.push({ path: `${skill} (not ours)`, ok: true });
-        continue;
-      }
-      if (!opts.dryRun) rmSync(target, { recursive: true, force: true });
-      results.push({ path: skill, ok: true });
-    }
-    return { status: "ok", results };
+/** Remove an extension file we dropped into a host's directory. */
+function uninstallFileHost(def, opts) {
+  const target = expand(def.target);
+  if (!existsSync(target)) {
+    return { status: "ok", results: [{ path: `${target} (absent)`, ok: true }] };
   }
-
-  if (def.kind === "file") {
-    const target = expand(def.target);
-    if (!existsSync(target)) {
-      results.push({ path: `${target} (absent)`, ok: true });
-      return { status: "ok", results };
-    }
-    if (!isOurFile(target)) {
-      console.error(`! ${target} was not written by continue-hook — leaving it alone`);
-      results.push({ path: `${target} (not ours)`, ok: true });
-      return { status: "ok", results };
-    }
-    // A file carrying our marker is reproducible from the package, so it is
-    // deleted outright — and never left beside the host, where OpenCode would
-    // load "something.js.removed" as a plugin.
-    if (!opts.dryRun) rmSync(target, { force: true });
-    results.push({ path: target, ok: true });
-    return { status: "ok", results };
+  if (!isOurFile(target)) {
+    console.error(`! ${target} was not written by continue-hook — leaving it alone`);
+    return { status: "ok", results: [{ path: `${target} (not ours)`, ok: true }] };
   }
+  // A file carrying our marker is reproducible from the package, so it is
+  // deleted outright — and never left beside the host, where OpenCode would
+  // load "something.js.removed" as a plugin.
+  if (!opts.dryRun) rmSync(target, { force: true });
+  return { status: "ok", results: [{ path: target, ok: true }] };
+}
 
-  if (def.kind === "dsh") {
-    const target = expand(def.target);
-    if (!isOurFile(path.join(target, "package.json"))) {
-      results.push({ path: `${target} (not ours)`, ok: true });
-      return { status: "ok", results };
-    }
-    if (!opts.dryRun) rmSync(target, { recursive: true, force: true });
-    results.push({ path: target, ok: true });
-    return { status: "ok", results };
+/** Remove the dsh plugin package. */
+function uninstallDshHost(def, opts) {
+  const target = expand(def.target);
+  if (!isOurFile(path.join(target, "package.json"))) {
+    return { status: "ok", results: [{ path: `${target} (not ours)`, ok: true }] };
   }
+  if (!opts.dryRun) rmSync(target, { recursive: true, force: true });
+  return { status: "ok", results: [{ path: target, ok: true }] };
+}
 
+/** Remove the portable skill layer, an extension file, or the dsh package. */
+function uninstallFilesystemHost(def, opts) {
+  if (def.kind === "skills") return uninstallSkillsHost(opts);
+  if (def.kind === "file") return uninstallFileHost(def, opts);
+  return uninstallDshHost(def, opts);
+}
+
+/**
+ * True when a config still holds something of the user's own.
+ *
+ * Pure: reads the object. A config this tool created and then emptied should
+ * not survive as "{}" — but a config the user had before we arrived must.
+ */
+function configHasUserContent(cleaned) {
+  return Object.keys(cleaned).some((key) => {
+    if (key === "version") return false; // we added it
+    if (key === "hooks") return Object.keys(cleaned.hooks || {}).length > 0;
+    return true;
+  });
+}
+
+/** Remove our hook entry from a JSON-config host, leaving the rest alone. */
+function uninstallJsonHost(def, opts) {
   const configPath = expand(def.config);
   if (!existsSync(configPath)) {
     // "removes only what this tool installed" — an uninstall must never create
     // the host's config file on a machine that never had one.
-    results.push({ path: `${configPath} (absent)`, ok: true });
-    return { status: "ok", results };
+    return { status: "ok", results: [{ path: `${configPath} (absent)`, ok: true }] };
   }
   const data = readJson(configPath, { dryRun: opts.dryRun, onBroken: "skip" });
   if (data === null) {
@@ -727,44 +855,42 @@ function uninstallHost(host, opts) {
     // was cleaned — and the caller must not delete the runtime it still points
     // at. That combination left a dead hook that exits 2 (a blocking error in
     // Claude Code) on every stop.
-    return { status: "skipped", reason: "unparsable config", results };
+    return { status: "skipped", reason: "unparsable config", results: [] };
   }
   const problem = configShapeProblem(data, def.kind);
   if (problem) {
-    return { status: "skipped", reason: problem, results };
+    return { status: "skipped", reason: problem, results: [] };
   }
   const cleaned = removeOurs(data, def.kind);
   try {
     if (!opts.dryRun) {
-      // A file this tool created and then emptied should not survive as "{}".
-      const meaningful = Object.keys(cleaned).filter((key) => {
-        if (key === "version") return false; // we added it
-        if (key === "hooks") return Object.keys(cleaned.hooks || {}).length > 0;
-        return true;
-      });
-      if (meaningful.length === 0 && def.selfNamed) rmSync(configPath, { force: true });
+      if (!configHasUserContent(cleaned) && def.selfNamed) rmSync(configPath, { force: true });
       else writeJson(configPath, cleaned);
     }
   } catch (err) {
     return {
       status: "failed",
       reason: `cannot write (${errorCode(err) || describeError(err)})`,
-      results,
+      results: [],
     };
   }
-  results.push({ path: configPath, ok: true });
-  return { status: "ok", results };
+  return { status: "ok", results: [{ path: configPath, ok: true }] };
+}
+
+function uninstallHost(host, opts) {
+  const def = HOSTS[host];
+  if (def.kind === "skills" || def.kind === "file" || def.kind === "dsh") {
+    return uninstallFilesystemHost(def, opts);
+  }
+  return uninstallJsonHost(def, opts);
 }
 
 function checkHost(host) {
   const def = HOSTS[host];
   // `check` is read-only. readJson() backs the file up and exits 3 on a parse
   // error, which turned a diagnostic into a mutation.
-
   if (def.kind === "skills") {
-    const found = SKILL_DIRS.filter((d) =>
-      isOurFile(path.join(expand(d), "continue-hook", "SKILL.md")),
-    );
+    const found = skillMarkerPaths().filter((p) => isOurFile(p));
     return {
       host,
       label: def.label,
@@ -772,39 +898,21 @@ function checkHost(host) {
       detail: `${found.length}/${SKILL_DIRS.length} skill dirs`,
     };
   }
-  if (def.kind === "file") {
-    const target = expand(def.target);
-    return { host, label: def.label, installed: isOurFile(target), detail: target };
-  }
-  if (def.kind === "dsh") {
-    const target = expand(def.target);
-    return {
-      host,
-      label: def.label,
-      installed: isOurFile(path.join(target, "package.json")),
-      detail: target,
-    };
+  const marker = markerPathFor(def);
+  if (marker) {
+    return { host, label: def.label, installed: isOurFile(marker), detail: marker };
   }
   const configPath = expand(def.config);
   if (!existsSync(configPath)) {
     return { host, label: def.label, installed: false, detail: `${configPath} (absent)` };
   }
   const data = readJson(configPath, { onBroken: "ignore" });
-  const key =
-    def.kind === "cursor-stop"
-      ? "stop"
-      : def.kind === "copilot-stop"
-        ? "agentStop"
-        : def.kind === "gemini-after"
-          ? "AfterAgent"
-          : "Stop";
-  const list = data?.hooks?.[key];
-  // Not a substring match: a user's own ~/bin/continue-hook-backup.sh made
-  // `check` report an install that did not exist.
-  const installed =
-    Array.isArray(list) &&
-    list.some((g) => isOurs(g) || (Array.isArray(g?.hooks) && g.hooks.some(isOurs)));
-  return { host, label: def.label, installed, detail: configPath };
+  return {
+    host,
+    label: def.label,
+    installed: configHasOurHook(data, def.kind),
+    detail: configPath,
+  };
 }
 
 function doctor() {
@@ -823,10 +931,7 @@ function doctor() {
   return rows;
 }
 
-function main() {
-  const opts = parseArgs(process.argv.slice(2));
-  if (opts.command === "help") {
-    console.log(`continue-hook — stop the agent from asking permission for things it should just do.
+const HELP_TEXT = `continue-hook — stop the agent from asking permission for things it should just do.
 
 Usage:
   continue-hook install   [--host <${HOST_NAMES.join("|")}|all>] [--dry-run]
@@ -835,158 +940,182 @@ Usage:
   continue-hook doctor
 
 Shared config: ~/.hermes/continue_hook.json
-Event log:    ~/.hermes/continue-hook-events.jsonl`);
+Event log:    ~/.hermes/continue-hook-events.jsonl`;
+
+/** `check` — report what is installed, per host. */
+function commandCheck(opts) {
+  let any = false;
+  const rows = [];
+  for (const host of opts.hosts) {
+    const row = checkHost(host);
+    any = any || row.installed;
+    rows.push(row);
+    if (!opts.json) {
+      console.log(`${row.installed ? "✓" : "✗"} ${row.label.padEnd(22)} ${row.detail}`);
+    }
+  }
+  // `--json` was parsed and then ignored; scripts had to scrape the table.
+  if (opts.json) console.log(JSON.stringify(rows, null, 2));
+  process.exitCode = any ? 0 : 1;
+}
+
+/** `doctor` — report which supported agents are present on this machine. */
+function commandDoctor(opts) {
+  const rows = doctor();
+  if (opts.json) {
+    console.log(JSON.stringify(rows, null, 2));
     return;
   }
+  for (const row of rows) {
+    console.log(
+      `${row.detected ? "●" : "○"} ${row.label.padEnd(22)} ${row.detected ? "detected" : "not found"}`,
+    );
+  }
+}
 
-  if (opts.command === "doctor") {
-    const rows = doctor();
-    if (opts.json) {
-      console.log(JSON.stringify(rows, null, 2));
-      return;
-    }
-    for (const row of rows) {
-      console.log(
-        `${row.detected ? "●" : "○"} ${row.label.padEnd(22)} ${row.detected ? "detected" : "not found"}`,
-      );
-    }
+/**
+ * Which hosts an install or uninstall should touch.
+ *
+ * "all" means every host *on this machine*, which is what the README says.
+ * Expanding it to all ten created config files for agents that are not
+ * installed. An uninstall is the exception: it has to reach everything we may
+ * ever have written, including a config whose host directory the user has
+ * since deleted.
+ */
+function resolveHosts(opts, uninstall) {
+  if (!opts.hostsAll) return opts.hosts;
+  if (uninstall) return [...HOST_NAMES];
+  const detected = doctor()
+    .filter((r) => r.detected)
+    .map((r) => r.host);
+  if (!detected.length) {
+    console.error(
+      "no supported agent found in this home directory.\n" +
+        "  name the hosts explicitly, e.g.  continue-hook install --host claude-code,cursor",
+    );
+    process.exit(1);
+  }
+  console.log(`detected: ${detected.join(", ")}`);
+  return [...detected, "skills"];
+}
+
+/** Print what a host's install or uninstall did. */
+function reportHostOutcome(host, def, outcome, opts, uninstall) {
+  if (outcome.status === "ok") {
+    const verb = uninstall ? "removed" : "installed";
+    console.log(`${def.label}: ${opts.dryRun ? `would be ${verb}` : verb}`);
+    if (!uninstall && def.note) console.log(`  → ${def.note}`);
+    if (host === "dsh" && !uninstall) printDshInstructions(def);
     return;
   }
+  // The host was not touched: say so, and keep going.
+  console.error(`${def.label}: ${outcome.status} — ${outcome.reason}; nothing was changed for it`);
+}
 
-  if (opts.command === "check") {
-    let any = false;
-    const rows = [];
-    for (const host of opts.hosts) {
-      const row = checkHost(host);
-      any = any || row.installed;
-      rows.push(row);
-      if (!opts.json) {
-        console.log(`${row.installed ? "✓" : "✗"} ${row.label.padEnd(22)} ${row.detail}`);
-      }
+/** The two commands a user has to run to load the dsh plugin. */
+function printDshInstructions(def) {
+  console.log(`  → build:  cd ${expand(def.target)} && npm install && npm run build`);
+  console.log(
+    `  → load:   npx @deepseek-ai/dsh --profile web --patch ${expand(def.target)}/cordis.patch.yml`,
+  );
+}
+
+/** Install or uninstall for one host, and say what happened. */
+function runForHost(host, opts, uninstall) {
+  const def = HOSTS[host];
+  const outcome = uninstall ? uninstallHost(host, opts) : installHost(host, opts);
+  reportHostOutcome(host, def, outcome, opts, uninstall);
+  for (const r of outcome.results || []) {
+    if (!r.ok) console.log(`  ! skipped (source missing): ${r.path}`);
+  }
+  return outcome.status === "ok";
+}
+
+/** The files this tool put in the runtime directory, per the install manifest. */
+function runtimeOwnedFiles() {
+  const manifest = path.join(RUNTIME_DIR, MANIFEST_NAME);
+  try {
+    if (existsSync(manifest)) {
+      const owned = JSON.parse(readFileSync(manifest, "utf8")).files;
+      if (Array.isArray(owned)) return owned;
     }
-    // `--json` was parsed and then ignored; scripts had to scrape the table.
-    if (opts.json) console.log(JSON.stringify(rows, null, 2));
-    process.exitCode = any ? 0 : 1;
+  } catch {
+    // A manifest we cannot read is no manifest.
+  }
+  // No manifest (an install from before this file existed): fall back to the
+  // known file list.
+  return [
+    ...RUNTIME_FILES,
+    ...TRANSPORT_FILES.map((file) => file.to),
+    ...HOST_NAMES.map((host) => HOSTS[host].hook).filter(Boolean),
+  ];
+}
+
+/** Remove a directory and every empty directory under it. */
+function pruneEmpty(dir) {
+  if (!existsSync(dir)) return;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const child = path.join(dir, entry.name);
+    pruneEmpty(child);
+    if (existsSync(child) && !readdirSync(child).length) {
+      rmSync(child, { recursive: true, force: true });
+    }
+  }
+}
+
+/**
+ * Clean up the runtime directory after an uninstall.
+ *
+ * The runtime holds executable Python, so it should go — but only when nothing
+ * still points at it. A host we could not read counts as "still used":
+ * deleting the runtime would leave its hook firing into a file that no longer
+ * exists (exit 2, which several hosts treat as "block").
+ */
+function cleanupRuntime(opts, skipped) {
+  const stillUsed = [...new Set([...installedHosts(), ...skipped])];
+  if (stillUsed.length) {
+    console.log(`\nRuntime kept: ${RUNTIME_DIR} (still needed by ${stillUsed.join(", ")})`);
     return;
   }
+  if (!existsSync(RUNTIME_DIR) || opts.dryRun) return;
 
+  // Only the files we put there. The dsh target lives *inside* this directory,
+  // so removing the tree would delete a user's own dsh plugin. Delete exactly
+  // the files this tool put there, from the manifest it wrote at install time.
+  // A user's own hookctl.py in the same directory is not in the manifest, so
+  // it survives.
+  for (const rel of runtimeOwnedFiles()) {
+    rmSync(path.join(RUNTIME_DIR, rel), { force: true });
+  }
+  rmSync(path.join(RUNTIME_DIR, MANIFEST_NAME), { force: true });
+  pruneEmpty(RUNTIME_DIR);
+  const leftover = existsSync(RUNTIME_DIR) ? readdirSync(RUNTIME_DIR) : [];
+  if (!leftover.length) {
+    rmSync(RUNTIME_DIR, { recursive: true, force: true });
+    console.log(`\nRuntime removed: ${RUNTIME_DIR}`);
+  } else {
+    console.log(`\nRuntime kept: ${RUNTIME_DIR} (still holds ${leftover.join(", ")})`);
+  }
+}
+
+/** `install` / `uninstall` — the same procedure, run in one direction or the other. */
+function commandInstallOrUninstall(opts) {
   const uninstall = opts.command === "uninstall";
   // Freeze the "which hosts already exist" snapshot before this run creates
   // any directory — otherwise every host looks present by the time the skills
   // layer runs.
   presentHostDirs = SKILL_DIRS.filter((dir) => existsSync(path.join(expand(dir), "..")));
 
-  if (opts.hostsAll) {
-    // "all" means every host *on this machine*, which is what the README says.
-    // Expanding it to all ten created config files for agents that are not
-    // installed.
-    if (uninstall) {
-      // Uninstall has to reach everything we may ever have written, including
-      // a config whose host directory the user has since deleted.
-      opts.hosts = [...HOST_NAMES];
-    } else {
-      const detected = doctor()
-        .filter((r) => r.detected)
-        .map((r) => r.host);
-      if (!detected.length) {
-        console.error(
-          "no supported agent found in this home directory.\n" +
-            "  name the hosts explicitly, e.g.  continue-hook install --host claude-code,cursor",
-        );
-        process.exit(1);
-      }
-      opts.hosts = [...detected, "skills"];
-      console.log(`detected: ${detected.join(", ")}`);
-    }
-  }
-
+  const hosts = resolveHosts(opts, uninstall);
   if (!uninstall) installRuntime(opts);
 
   const skipped = [];
-  for (const host of opts.hosts) {
-    const def = HOSTS[host];
-    const outcome = uninstall ? uninstallHost(host, opts) : installHost(host, opts);
-    const results = outcome.results || [];
-    if (outcome.status === "ok") {
-      const verb = uninstall ? "removed" : "installed";
-      console.log(`${def.label}: ${opts.dryRun ? `would be ${verb}` : verb}`);
-      if (!uninstall && def.note) console.log(`  → ${def.note}`);
-      if (host === "dsh" && !uninstall) {
-        console.log(`  → build:  cd ${expand(def.target)} && npm install && npm run build`);
-        console.log(
-          `  → load:   npx @deepseek-ai/dsh --profile web --patch ${expand(def.target)}/cordis.patch.yml`,
-        );
-      }
-    } else {
-      // The host was not touched: say so, and keep going.
-      skipped.push(host);
-      console.error(
-        `${def.label}: ${outcome.status} — ${outcome.reason}; nothing was changed for it`,
-      );
-    }
-    for (const r of results) {
-      if (!r.ok) console.log(`  ! skipped (source missing): ${r.path}`);
-    }
+  for (const host of hosts) {
+    if (!runForHost(host, opts, uninstall)) skipped.push(host);
   }
 
-  if (uninstall) {
-    // The runtime directory holds executable Python, so it should go — but only
-    // when nothing still points at it. A host we could not read counts as
-    // "still used": deleting the runtime would leave its hook firing into a
-    // file that no longer exists (exit 2, which several hosts treat as "block").
-    const stillUsed = [...new Set([...installedHosts(), ...skipped])];
-    if (stillUsed.length) {
-      console.log(`\nRuntime kept: ${RUNTIME_DIR} (still needed by ${stillUsed.join(", ")})`);
-    } else if (existsSync(RUNTIME_DIR) && !opts.dryRun) {
-      // Only the files we put there. The dsh target lives *inside* this
-      // directory, so removing the tree would delete a user's own dsh plugin.
-      // Delete exactly the files this tool put there, from the manifest it
-      // wrote at install time. A user's own hookctl.py in the same directory
-      // is not in the manifest, so it survives.
-      const manifest = path.join(RUNTIME_DIR, MANIFEST_NAME);
-      let owned = null;
-      try {
-        if (existsSync(manifest)) owned = JSON.parse(readFileSync(manifest, "utf8")).files;
-      } catch {
-        owned = null;
-      }
-      if (Array.isArray(owned)) {
-        for (const rel of owned) rmSync(path.join(RUNTIME_DIR, rel), { force: true });
-      } else {
-        // No manifest (an install from before this file existed): fall back to
-        // the known file list.
-        for (const file of RUNTIME_FILES) rmSync(path.join(RUNTIME_DIR, file), { force: true });
-        for (const file of TRANSPORT_FILES)
-          rmSync(path.join(RUNTIME_DIR, file.to), { force: true });
-        for (const host of HOST_NAMES) {
-          const def = HOSTS[host];
-          if (def.hook) rmSync(path.join(RUNTIME_DIR, def.hook), { force: true });
-        }
-      }
-      rmSync(manifest, { force: true });
-      // Drop the now-empty per-host directories, then the root if it is empty.
-      const pruneEmpty = (dir) => {
-        if (!existsSync(dir)) return;
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
-          if (entry.isDirectory()) {
-            const child = path.join(dir, entry.name);
-            pruneEmpty(child);
-            if (existsSync(child) && !readdirSync(child).length) {
-              rmSync(child, { recursive: true, force: true });
-            }
-          }
-        }
-      };
-      pruneEmpty(RUNTIME_DIR);
-      const leftover = existsSync(RUNTIME_DIR) ? readdirSync(RUNTIME_DIR) : [];
-      if (!leftover.length) {
-        rmSync(RUNTIME_DIR, { recursive: true, force: true });
-        console.log(`\nRuntime removed: ${RUNTIME_DIR}`);
-      } else {
-        console.log(`\nRuntime kept: ${RUNTIME_DIR} (still holds ${leftover.join(", ")})`);
-      }
-    }
-  }
+  if (uninstall) cleanupRuntime(opts, skipped);
 
   if (skipped.length) {
     console.error(
@@ -1001,6 +1130,35 @@ Event log:    ~/.hermes/continue-hook-events.jsonl`);
     console.log("Config:        ~/.hermes/continue_hook.json");
     console.log("Event log:     ~/.hermes/continue-hook-events.jsonl");
   }
+}
+
+function main() {
+  let opts;
+  try {
+    opts = parseArgs(process.argv.slice(2));
+  } catch (err) {
+    // The shell's job: turn a pure "this command line is wrong" into an exit
+    // code. The parser itself never exits.
+    if (err instanceof UsageError) {
+      console.error(err.message);
+      process.exit(2);
+    }
+    throw err;
+  }
+
+  if (opts.command === "help") {
+    console.log(HELP_TEXT);
+    return;
+  }
+  if (opts.command === "doctor") {
+    commandDoctor(opts);
+    return;
+  }
+  if (opts.command === "check") {
+    commandCheck(opts);
+    return;
+  }
+  commandInstallOrUninstall(opts);
 }
 
 main();

@@ -368,11 +368,28 @@ binaries; the point of the table is that no row is missing.
 | Job | Python | TypeScript / JS | Config | Runs on |
 |---|---|---|---|---|
 | **Lint** | ruff `check` | **eslint** (flat config, typescript-eslint) | `pyproject.toml`, `eslint.config.mjs` | every push |
+| **Complexity** | ruff `C901` (ceiling **10**) | eslint `complexity` (ceiling **10**) | `pyproject.toml`, `eslint.config.mjs` | every push |
 | **Format** | ruff `format` | **prettier** | `pyproject.toml`, `.prettierrc.json` | every push |
 | **Types** | **mypy** | **tsc** — `strict` for the TS sources, `checkJs` for the JS ones | `pyproject.toml`, `tsconfig.json`, `tsconfig.checkjs.json` | every push |
 | **Tests** | **pytest** | **vitest** | `pyproject.toml`, `vitest.config.mjs` | every push |
 | **Coverage floor** | pytest-cov (`fail_under = 78`) | vitest v8 (`lines 80`) | same files | every push |
 | **Zero-dependency run** | stdlib `unittest` | — | — | 3.10–3.13 |
+
+**The complexity ceilings are not decoration.** Before the gate existed, the
+worst function in the shipped code was 47 (the installer's `main`) and the
+worst in Python was 17 (the plugin entry point) — every one of them a decision
+table, a parse, or a per-kind dispatch written as a chain of branches. The fix
+was the "functional core, imperative shell" split: the *decision* moved into a
+pure function that takes data and returns data, and the *shell* kept the I/O.
+`parseArgs` now throws a `UsageError` instead of calling `process.exit`;
+`configShapeProblem` answers a question instead of validating in place; the
+installer's per-kind work is three small functions and a dispatch, not one
+47-branch function. The highest function left is 9.
+
+Both ceilings are checked by their own test (`tests/test_complexity_gate.py`),
+which asserts the configured threshold, proves a deliberately too-complex
+function *is* reported, and runs the real check over the real files — a gate
+that cannot fail is not a gate.
 
 Python's `ruff` plays two roles (lint and format) in one binary; on the JS side
 those are two tools, eslint and prettier. `mypy` has no JS equivalent that

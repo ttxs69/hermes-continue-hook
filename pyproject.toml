@@ -42,7 +42,7 @@ extend-exclude = ["adapters/dsh", ".venv", "build", "dist"]
 exclude = ["patch-mode/continue_hook.py"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "C90", "RUF"]
 ignore = [
   "E501",    # long lines are handled by the formatter
   "SIM105",  # contextlib.suppress is slower than try/except here
@@ -51,6 +51,20 @@ ignore = [
   # product, not typos in an English codebase).
   "RUF001", "RUF002", "RUF003",
 ]
+
+[tool.ruff.lint.mccabe]
+# Cyclomatic complexity ceiling.
+#
+# Measured before the gate went in: 17 (the plugin entry point), 16 (the
+# transcript reader), 14 (the decision service). All of them were a decision
+# table, a parse, or a cap check written as a chain of branches — the fix was
+# to move the decision into a pure function and leave the shell to carry it
+# out, not to sprinkle `noqa` over it.
+#
+# The ceiling is 10 and the highest function left in the shipped code is 9
+# (`_decide_locked`). The headroom is deliberate: a ladder with six outcomes
+# is still a ladder, and the next one should be a table.
+max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E402"]

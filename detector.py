@@ -223,6 +223,27 @@ def _int(value: Any, fallback: int) -> int:
         return fallback
 
 
+def strip_code_and_links(text: str) -> str:
+    """Remove code blocks, inline code, links and URLs. Pure.
+
+    Applied to the WHOLE reply before the closing window is taken. Doing it
+    the other way round meant a fenced block whose closing ``` fell outside the
+    last 240 characters left its "?" in place — and "the reply ends with a code
+    block" is one of the most common shapes.
+    """
+    for pattern in (_CODE_BLOCK_RE, _INLINE_CODE_RE, _MARKDOWN_LINK_RE, _URL_RE):
+        text = pattern.sub(" ", text)
+    return text
+
+
+def _first_trigger_hit(triggers: dict, tail: str) -> str | None:
+    """The name of the first trigger pattern that matches, or None. Pure."""
+    for name in ("offer", "hand_off", "confirm_seek"):
+        if _compile(triggers.get(name)).search(tail):
+            return name
+    return None
+
+
 def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     """Return ``(should_nudge, reason_code)``. Pure transport layer.
 
@@ -234,14 +255,7 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     if not text or not str(text).strip():
         return False, "empty"
     full = str(text).strip()
-    # Strip code and links from the WHOLE reply, then take the closing window.
-    # Doing it the other way round meant a fenced block whose closing ``` fell
-    # outside the last 240 characters left its "?" in place — and "the reply
-    # ends with a code block" is one of the most common shapes.
-    stripped = _CODE_BLOCK_RE.sub(" ", full)
-    stripped = _INLINE_CODE_RE.sub(" ", stripped)
-    stripped = _MARKDOWN_LINK_RE.sub(" ", stripped)
-    stripped = _URL_RE.sub(" ", stripped)
+    stripped = strip_code_and_links(full)
     tail_chars = _int(cfg.get("tail_chars", 240), 240)
     tail = full[-tail_chars:]
     ex = cfg.get("exclusions", {})
@@ -254,14 +268,12 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     # The closing window of the code-stripped text, so the "?" check only sees
     # punctuation that is actually prose.
     no_urls = _QUOTE_RE.sub("", stripped[-tail_chars:])
-    hit = None
-    for name in ("offer", "hand_off", "confirm_seek"):
-        if _compile(tr.get(name)).search(trig_tail):
-            hit = f"trigger:{name}"
-            break
-    if hit is None and tr.get("question_mark", True) and re.search(r"[？?]", no_urls):
+    name = _first_trigger_hit(tr, trig_tail)
+    if name is not None:
+        hit = f"trigger:{name}"
+    elif tr.get("question_mark", True) and re.search(r"[？?]", no_urls):
         hit = "trigger:question_mark"
-    if hit is None:
+    else:
         # The turn ended cleanly — say so even when the cap is already reached.
         return False, "no_trigger"
     if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
