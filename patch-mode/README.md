@@ -109,3 +109,25 @@ The same shared config and the same event log as every other host:
 - `core-gate.patch` — the multi-file diff against the Hermes core
 - `continue_hook.py` — **generated** module the core gate imports
 - `install.sh` — version-guarded installer / remover
+
+## Pinned revision
+
+`core-gate.patch` is generated against Hermes core **`d923a5e`** (recorded in
+`BASE_COMMIT`). It changes four files:
+
+| File | Change |
+|---|---|
+| `agent/continue_hook.py` | new — the generated build of the shared engine |
+| `agent/turn_stop_gates.py` | the stop-gate call |
+| `agent/turn_finalizer.py` | the flag that lets a nudge re-enter the turn |
+| `agent/session_persistence.py` | keep the nudge counter across a restart |
+
+Check before you install:
+
+```bash
+./install.sh --check /path/to/hermes-agent
+```
+
+`✓ applies cleanly` — go ahead. `• already installed` — nothing to do.
+`✗ does not apply` — your core has moved past the pin; use the plugin mode.
+The installer refuses in that case instead of half-applying a stale diff.

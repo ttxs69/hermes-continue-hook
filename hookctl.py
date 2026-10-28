@@ -210,6 +210,48 @@ def _session_entry(state: dict[str, Any], session_id: str) -> dict[str, Any]:
     return entry
 
 
+def close_chain(
+    *,
+    session_id: str,
+    host: str,
+    platform: str = "",
+    state_path: Path | str | None = None,
+    events_path: Path | str | None = None,
+) -> None:
+    """End this turn's nudge chain without nudging.
+
+    A host that reports ``stop_hook_active`` is telling us it is already
+    continuing because of a block we issued. That continuation ends *this*
+    turn's chain, and the next user turn must start from zero.
+
+    Skipping this call entirely — what the adapters used to do — left the
+    per-turn counter raised, so ``max_nudges_per_turn: 2`` silently became a
+    quota shared across user turns: the second turn spent the first turn's
+    allowance and the third got nothing.
+    """
+    resolved = Path(state_path) if state_path else default_state_path()
+    events = Path(events_path) if events_path else default_events_path()
+    with _StateLock(resolved):
+        state = read_state(resolved)
+        entry = _session_entry(state, session_id)
+        entry["count"] = 0
+        entry["chain"] = False
+        state["version"] = STATE_VERSION
+        write_state(state, resolved)
+    log_event(
+        {
+            "session": session_id,
+            "host": host,
+            "platform": platform,
+            "decision": "skip",
+            "reason": "chain_closed",
+            "attempt": 0,
+            "snippet": "",
+        },
+        events,
+    )
+
+
 def decide(
     text: str,
     *,

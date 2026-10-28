@@ -332,14 +332,81 @@ class TestCommonHelpers(unittest.TestCase):
 
     def test_host_continued_detects_all_spellings(self):
         common = self._load_common()
-        for field in ("stop_hook_active", "stopHookActive", "continue"):
+        for field in ("stop_hook_active", "stopHookActive", "loop_active"):
             self.assertTrue(common.host_continued({field: True}), field)
         self.assertFalse(common.host_continued({"stop_hook_active": False}))
+
+    def test_continue_is_not_a_continuation_signal(self):
+        """Gemini's generic field means the opposite of "keep going".
+
+        ``{"continue": false}`` stops the loop. Reading the field as "the host
+        already continued" would make the first nudge of a session never fire.
+        """
+        common = self._load_common()
+        self.assertFalse(common.host_continued({"continue": True}))
+        self.assertFalse(common.host_continued({"continue": False}))
 
     def test_host_loop_count(self):
         common = self._load_common()
         self.assertEqual(common.host_loop_count({"loop_count": 3}), 3)
         self.assertEqual(common.host_loop_count({}), 0)
+
+
+class TestTheChainCloses(unittest.TestCase):
+    """A continuation the host performed ends *this* turn's chain.
+
+    Without the close, ``max_nudges_per_turn`` silently became a quota shared
+    across user turns: the second turn spent the first turn's allowance and the
+    third got nothing at all.
+    """
+
+    def _run(self, home: Path, payload: dict) -> str:
+        env = {**os.environ, "HOME": str(home), "HERMES_CONTINUE_HOOK": "1"}
+        result = subprocess.run(
+            [sys.executable, str(HOOKS["claude-code"])],
+            input=json.dumps(payload).encode(),
+            capture_output=True,
+            env=env,
+            timeout=30,
+        )
+        return result.stdout.decode().strip()
+
+    def test_a_host_continuation_resets_the_per_turn_counter(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".hermes").mkdir()
+
+            first = self._run(home, claude_payload(last_assistant_message=ASK_ZH))
+            self.assertIn("#1", first, "the first turn should nudge once")
+
+            # the host continues because of our block, then ends cleanly
+            closed = self._run(home, claude_payload(
+                stop_hook_active=True, last_assistant_message=PLAIN_ZH))
+            self.assertEqual(closed, "", "a host-driven continuation must not nudge again")
+
+            # a new user turn starts from zero — not from the previous turn's count
+            second = self._run(home, claude_payload(last_assistant_message=ASK_ZH))
+            self.assertIn("#1", second,
+                          "the per-turn counter leaked into the next user turn")
+
+            # and it keeps working turn after turn (the old bug froze it at #2)
+            self._run(home, claude_payload(
+                stop_hook_active=True, last_assistant_message=PLAIN_ZH))
+            third = self._run(home, claude_payload(last_assistant_message=ASK_ZH))
+            self.assertIn("#1", third)
+
+    def test_closing_the_chain_does_not_reset_the_session_total(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".hermes").mkdir()
+            for _ in range(3):
+                self._run(home, claude_payload(last_assistant_message=ASK_ZH))
+                self._run(home, claude_payload(
+                    stop_hook_active=True, last_assistant_message=PLAIN_ZH))
+            state = json.loads((home / ".hermes" / "continue-hook-state.json").read_text())
+            entry = state["sessions"]["cc-1"]
+            self.assertEqual(entry["count"], 0, "per-turn count must be closed out")
+            self.assertEqual(entry["total"], 3, "the session total must keep accumulating")
 
 
 if __name__ == "__main__":

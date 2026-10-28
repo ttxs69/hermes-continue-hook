@@ -81,7 +81,7 @@
   fails the build on local paths or credential-shaped strings.
 - Docs: `docs/ARCHITECTURE.md` (how the layers fit) and
   `docs/CONFIGURATION.md` (every knob, with the defaults explained).
-- Tests: 107 Python + 19 Node (OpenCode, installer, DeepSeek Harness).
+- Tests: 127 Python + 33 Node (9 OpenCode, 17 installer, 7 DeepSeek Harness).
 
 ## 1.2.0 (2026-10-28)
 

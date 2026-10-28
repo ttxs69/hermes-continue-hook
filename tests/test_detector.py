@@ -74,6 +74,55 @@ class TestDetectEn(unittest.TestCase):
     def test_done(self):
         self.case("Done. All tests pass.", False)
 
+    def test_the_english_boundaries_are_as_wide_as_the_chinese_ones(self):
+        """Every one of these is user-only: money, credentials, destruction,
+        publishing, or sending something to a third party.
+
+        They used to nudge, which told an English-speaking agent that asking
+        for a subscription, deleting production logs or emailing a customer
+        was its own call. The nudge text still asks the model to self-check,
+        but the exclusion layer is what the README promises.
+        """
+        for text in (
+            "This requires a paid subscription. Should I upgrade?",
+            "Should I subscribe to the paid tier?",
+            "Should I spend $200 on the ad campaign?",
+            "Should I use the production API key?",
+            "Can you give me the AWS secret access key?",
+            "Do you want me to rotate the production credentials?",
+            "Do you want me to revoke the API token?",
+            "Should I delete the old logs?",
+            "Should I overwrite the config file?",
+            "Should I force-push to master?",
+            "Should I delete the production database?",
+            "Want me to publish the release notes?",
+            "Should I deploy this to production?",
+            "Want me to email the customer the invoice?",
+            "Shall I send it to the client?",
+            "Want me to forward this to the team?",
+            "Should I push this to main?",
+            "Should I merge the PR?",
+        ):
+            self.case(text, False)
+
+    def test_english_triggers_are_case_insensitive(self):
+        """`should i` is lowercase in the pattern, and "Should I…" starts the
+        sentence — so the offer trigger never fired on the most common form and
+        only the trailing "?" caught it."""
+        got, reason = detect("Should I also update the changelog?", 0, self.CFG)
+        self.assertTrue(got)
+        self.assertNotEqual(reason, "trigger:question_mark",
+                            "the offer trigger should match before the fallback")
+
+    def test_a_normal_english_offer_still_nudges(self):
+        for text in (
+            "Want me to add the tests as well?",
+            "Should I add a unit test for the edge case?",
+            "Want me to refactor that helper?",
+            "Should I rename this variable for clarity?",
+        ):
+            self.case(text, True)
+
 
 class TestQuotedMentions(unittest.TestCase):
     """Regression: quoting the trigger patterns in a report must not fire

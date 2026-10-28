@@ -40,9 +40,10 @@ def main() -> None:
     payload = _common.read_payload()
 
     if _common.host_continued(payload):
-        _common.log_event("qwen", {"session": _common.session_key(payload, "qwen"),
-                                   "decision": "skip", "reason": "stop_hook_active",
-                                   "attempt": 0, "snippet": ""})
+        # The host is already continuing because of our block: this turn's
+        # chain is over. Closing it resets the per-turn counter — skipping
+        # this is what made the counter a quota shared across user turns.
+        _common.close_chain(session_id=_common.session_key(payload, "qwen"), host="qwen")
         raise SystemExit(0)
 
     cfg = _common.load_config()

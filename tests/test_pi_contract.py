@@ -57,8 +57,18 @@ class TestPiExtensionContract(unittest.TestCase):
         """A detector error must never throw into Pi's event loop."""
         self.assertRegex(self.src, r"catch\s*\{[\s\S]{0,200}return undefined")
 
-    def test_logging_is_never_fatal(self):
-        self.assertRegex(self.src, r"function logEvent[\s\S]{0,400}catch\s*\{")
+    def test_the_reply_goes_over_stdin_not_argv(self):
+        """A reply passed as an argument lands in /proc/<pid>/cmdline, where any
+        process on the machine can read it, and a long reply hits E2BIG."""
+        self.assertRegex(self.src, r'"--text",\s*"-"')
+        self.assertRegex(self.src, r"input:\s*text")
+
+    def test_policy_lives_in_the_shared_engine_only(self):
+        """No second state file, no local counter, no local cooldown — one
+        decision service, or the hosts disagree about the caps."""
+        for symbol in ("STATE_PATH", "EVENTS_PATH", "bumpCounter", "function logEvent"):
+            self.assertNotIn(symbol, self.src,
+                             f"{symbol} belongs in hookctl.py, not in the Pi extension")
 
 
 class TestDetectorCli(unittest.TestCase):

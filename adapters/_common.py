@@ -196,7 +196,10 @@ def host_continued(payload: dict[str, Any]) -> bool:
 
     Hosts spell it differently; check every known spelling.
     """
-    for field in ("stop_hook_active", "stopHookActive", "continue", "loop_active"):
+    # NOT "continue": Gemini's generic output field means the opposite
+    # ({"continue": false} stops the loop). Reading it as "already continuing"
+    # would make the first nudge of a session never fire.
+    for field in ("stop_hook_active", "stopHookActive", "loop_active"):
         if payload.get(field):
             return True
     return False
@@ -244,3 +247,11 @@ def read_payload() -> dict[str, Any]:
         return json.load(sys.stdin)
     except Exception:
         return {}
+
+
+def close_chain(*, session_id: str, host: str, platform: str = "") -> None:
+    """Tell the decision service that this turn's nudge chain is over."""
+    try:
+        hookctl.close_chain(session_id=session_id, host=host, platform=platform)
+    except Exception as exc:  # never break the host's turn
+        sys.stderr.write(f"continue-hook: close_chain failed: {type(exc).__name__}\n")

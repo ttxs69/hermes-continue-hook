@@ -65,7 +65,9 @@ jobs:
   dsh:
     name: dsh plugin (typecheck + runtime)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # No continue-on-error: the fixture once installed no decision service, so
+    # every "no nudge" case passed for the wrong reason and the whole job was
+    # green while the plugin could never have fired.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

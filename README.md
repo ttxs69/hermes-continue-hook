@@ -214,8 +214,14 @@ Host-by-host:
 | Pi | `--host pi` | extension goes to `~/.pi/agent/extensions/` |
 | DeepSeek Harness | `--host dsh` | `npm install && npm run build`, then `dsh plugin add <dir>` |
 
-Plugin marketplaces (Claude / Codex / Kimi / Antigravity / Devin / Muse /
-Copilot / Grok / Droid) read the manifests in this repo:
+Plugin marketplaces for the hosts that have a manifest format read the files
+in this repo. Present: Claude Code (`.claude-plugin/`), Codex
+(`.codex-plugin/`), Cursor (`.cursor-plugin/`), Kimi (`.kimi-plugin/`),
+Antigravity (`.antigravity-plugin/`), Devin (`.devin-plugin/`), Muse
+(`.muse-plugin/`), Gemini (`gemini-extension.json`), and the cross-host
+`.agents/plugins/marketplace.json`. Copilot CLI, Grok Build, Factory Droid and
+Windsurf have no manifest format — install them with `--host copilot` (or the
+portable skill layer), which is what actually works:
 `.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`, `.kimi-plugin/`,
 `.antigravity-plugin/`, `.devin-plugin/`, `.muse-plugin/`,
 `.agents/plugins/marketplace.json`, `gemini-extension.json`.
@@ -256,8 +262,9 @@ of date.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests   # 95 tests: detector, plugin, 8 adapters, dsh/pi contracts
+python3 -m unittest discover -s tests   # 127 tests: detector, plugin, 8 adapters, dsh/pi contracts
 node tests/test_opencode.mjs            # 9 tests: OpenCode plugin against a mock SDK client
+node tests/test_installer.mjs           # 17 tests: install / idempotence / uninstall / non-destruction
 node tests/test_dsh.mjs                 # 7 tests: dsh plugin, compiled against the real dsh packages
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
@@ -271,6 +278,11 @@ everything else runs offline.
 |---|---|---|---|
 | **Plugin (default)** | ✗ (follow-up turn, full context) | ✅ | `hermes plugins install` |
 | **Patch mode** — a core stop gate; version-pinned, see the caveat below | ✅ | ✗ | `patch-mode/install.sh <hermes-agent-path>` |
+
+Patch mode touches **four core files** (three modified, one new) and is pinned to
+core commit `d923a5e`. `patch-mode/install.sh --check <path>` tells you whether
+your tree is one it can patch; the installer refuses anything else rather than
+half-applying a stale diff.
 | **Preventive layer** — standing reminder appended to user messages (optional `hooks.pre_llm_call`) | prevention | ✅ | copy `agent-hooks/ch_preventive.sh` into `~/.hermes/agent-hooks/` and register it |
 | Upstream PR (make `pre_verify` fire on all text stops) | ✅ | ✅ after merge | roadmap |
 
@@ -279,7 +291,9 @@ their source-verified reasons are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Safety
 
-- Per-turn nudge cap (default 2) and per-session cooldown (default 300 s)
+- Per-turn nudge cap (default 2) and per-session cap (default 20). The cooldown is
+  **off by default** — a non-zero value silently stops the hook for minutes after
+  the first nudge.
 - Boundary exclusions short-circuit before any trigger: money / identity /
   credentials / publishing / destructive actions are re-asked, never auto-run
 - Kill switch: config `enabled: false`, or env `HERMES_CONTINUE_HOOK=0`

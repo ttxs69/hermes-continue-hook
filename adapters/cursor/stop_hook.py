@@ -46,9 +46,9 @@ def main() -> None:
     if str(payload.get("status", "completed")) != "completed":
         raise SystemExit(0)
     if _common.host_loop_exceeded(payload, 2):
-        _common.log_event("cursor", {"session": _common.session_key(payload, "cursor"),
-                                     "decision": "skip", "reason": "host_loop_count",
-                                     "attempt": 0, "snippet": ""})
+        # Cursor's own loop cap fired: the conversation's chain is over, and the
+        # next user turn has to start from zero.
+        _common.close_chain(session_id=_common.session_key(payload, "cursor"), host="cursor")
         raise SystemExit(0)
 
     cfg = _common.load_config()

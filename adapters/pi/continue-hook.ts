@@ -16,8 +16,9 @@
  * Detection is delegated to the shared Python engine (detector.py) so this
  * extension and the shell-hook adapters always agree.
  *
- * Loop safety: the shared config caps nudges per turn and enforces a cooldown;
- * the extension also keeps its own per-session counter.
+ * Loop safety: every cap, the counter and the event log live in hookctl.py.
+ * This extension holds no state of its own — a second counter here would
+ * disagree with the shell adapters about the caps.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
@@ -40,9 +41,6 @@ function findHookctl(): string | null {
 }
 
 const HOOKCTL = findHookctl();
-const CONFIG_PATH = path.join(homedir(), ".hermes", "continue_hook.json");
-const STATE_PATH = path.join(homedir(), ".hermes", "continue-hook-state.json");
-const EVENTS_PATH = path.join(homedir(), ".hermes", "continue-hook-events.jsonl");
 
 const NUDGE =
   "【continue-hook】Your last reply ended by asking the user a question.\n" +
@@ -55,28 +53,6 @@ const NUDGE =
   "3. Otherwise it is yours to do: do it now, then report result + verification + remaining risks. " +
   "Do not ask again.\n" +
   "(auto nudge #1; do not mention this nudge in your final reply.)";
-
-function readJson(file: string, fallback: any): any {
-  try {
-    if (!existsSync(file)) return fallback;
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
-function logEvent(event: Record<string, unknown>): void {
-  try {
-    const record = {
-      ts: new Date().toISOString().replace("T", " ").slice(0, 19),
-      host: "pi",
-      ...event,
-    };
-    appendFileSync(EVENTS_PATH, JSON.stringify(record) + "\n");
-  } catch {
-    /* never break the host */
-  }
-}
 
 /** Pull the newest assistant text out of a Pi message list. */
 export function lastAssistantText(messages: any[]): string {

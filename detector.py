@@ -92,14 +92,29 @@ DEFAULTS: dict = {
         # destructive actions.
         "boundary": [
             "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销",
-            "对外发布|发布出去|删掉|删除数据|授权",
-            r"(cost|charge|costs|charges|spend|spent|price|priced|budget)\s*\$?\d|"
-            r"\$\s*\d|€\s*\d|£\s*\d|¥\s*\d|"
-            r"(do you )?approve|approval|\bapprove\b|sign(ing)? (in|up) as you|"
-            r"your (credentials|api key|credit card|password)|\bpassword\b|2fa|otp code|"
-            r"delete (the|all|my)? ?(data|files|branch|repo|database)|"
-            r"publish (it|this|the)|push (it|this|the) to (main|master|prod|production)|"
-            r"deploy (it|this|the) to prod|merge (the|this) pr|send (the|this) email to",
+            "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她)",
+            "生产环境|线上环境|主分支|改数据库|重启服务",
+            # Money, credentials, destructive actions and external sending are
+            # all user-only. The English list has to be as wide as the Chinese
+            # one — an English-speaking agent used to talk itself straight
+            # through a payment, a deletion or a send.
+            r"\b(paid|paying|prepay|subscription|upgrade to (pro|paid|premium))\b|"
+            r"\b(cost|costs|charge|charges|spend|spent|price|priced|budget|fee|fees)\b|"
+            r"\b(purchase|buy|renew|refund|invoice|billing)\b|"
+            r"[$€£¥]\s*\d|\d\s*(usd|eur|cny|rmb|dollars?)\b|"
+            r"\b(api key|api keys|secret|secrets|credential|credentials|token|"
+            r"access key|private key|ssh key|passphrase|password|2fa|otp|verification code)\b|"
+            r"\b(delete|deleting|deletion|remove|drop|truncate|purge|wipe|erase|"
+            r"overwrite|reset --hard|force[- ]push|rm -rf)\b|"
+            r"\b(publish|publishing|deploy|deploying|release|announce|tweet|"
+            r"post (it|this|that)|make (it|this) public|merge (it|this|the pr))\b|"
+            r"\b(send|email|e-?mail|forward|reply to|message|notify|dm|invoice)\b.{0,24}"
+            r"\b(client|customer|user|users|them|him|her|subscriber|list|audience|boss|team)\b|"
+            r"\b(production|prod|live (environment|server|site)|main branch|master branch)\b|"
+            r"\b(to|into|onto) (main|master|prod|production|the main branch|the master branch)\b|"
+            r"\bmerge\b.{0,20}\b(pr|pull request|branch)\b|"
+            r"\b(rotate|revoke) (the |my |our )?(credentials|keys?|tokens?)\b|"
+            r"\b(approve|approval|authorize|authorise|sign(ing)? (in|up) as you)\b",
         ],
         # Second-person requests: only the user can provide / decide this.
         "user_must": [
@@ -152,7 +167,11 @@ def _compile(patterns) -> re.Pattern:
     pats = [p for p in (patterns or []) if p]
     if not pats:
         return re.compile(r"(?!x)x")  # never-matching pattern
-    return re.compile("|".join(f"(?:{p})" for p in pats), re.S)
+    # Case-insensitive: the English triggers are written lowercase, so without
+    # this flag "Should I…" (the most common form — it starts the sentence) did
+    # not match `should i` at all and only the trailing "?" caught it. The
+    # Chinese patterns are unaffected.
+    return re.compile("|".join(f"(?:{p})" for p in pats), re.S | re.IGNORECASE)
 
 
 def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:

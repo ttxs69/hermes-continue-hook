@@ -15,7 +15,7 @@
  *
  * Loop safety:
  *   * one nudge per session per turn cycle, capped by the shared config
- *   * a per-session counter and cooldown are kept in the shared state file
+ *   * caps, the per-session counter and the event log all live in hookctl.py
  *   * if the detector is missing or errors, the plugin does nothing (fail open)
  */
 import { spawnSync } from "node:child_process";
@@ -51,28 +51,6 @@ const NUDGE =
   "3. Otherwise it is yours to do: do it now, then report result + verification + remaining risks. " +
   "Do not ask again.\n" +
   "(auto nudge #1; do not mention this nudge in your final reply.)";
-
-function readJson(file, fallback) {
-  try {
-    if (!existsSync(file)) return fallback;
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
-function logEvent(host, event) {
-  try {
-    const record = {
-      ts: new Date().toISOString().replace("T", " ").slice(0, 19),
-      host,
-      ...event,
-    };
-    appendFileSync(EVENTS_PATH, JSON.stringify(record) + "\n");
-  } catch {
-    /* logging must never break the host */
-  }
-}
 
 /** Ask the shared decision service whether this reply should be nudged. */
 function shouldNudge(text, sessionId) {

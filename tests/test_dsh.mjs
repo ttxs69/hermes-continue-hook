@@ -112,12 +112,14 @@ function runTurn(reply, { sessionId = "s1", config = {} } = {}) {
 }
 
 let passed = 0;
+let failed = 0;
 async function test(name, fn) {
   try {
     await fn();
     passed++;
     console.log(`  ok  ${name}`);
   } catch (err) {
+    failed++;
     console.error(`FAIL  ${name}\n      ${err.message}`);
     process.exitCode = 1;
   }
@@ -179,5 +181,7 @@ await test("a broken detector fails open", () => {
   if (steered.length !== 0) throw new Error(`expected 0 steers, got ${steered.length}`);
 });
 
-console.log(`\n${passed} dsh plugin test(s) passed`);
+const total = passed + failed;
+console.log(`\n${passed}/${total} dsh plugin test(s) passed`);
+if (passed !== total) process.exitCode = 1;
 if (!existsSync(path.join(WORK, "lib", "index.js"))) process.exitCode = 1;

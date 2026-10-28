@@ -139,6 +139,9 @@ function parseArgs(argv) {
     }
   }
   if (rest.length) opts.command = rest[0];
+  // "skills" named by hand means "put the portable skill everywhere"; skills
+  // that arrive through "all" only go to hosts this machine actually has.
+  opts.skillsExplicit = opts.hosts.includes("skills");
   if (opts.hosts.includes("all")) opts.hosts = [...HOST_NAMES];
   const unknown = opts.hosts.filter((h) => !HOSTS[h]);
   if (unknown.length) {
@@ -163,12 +166,69 @@ function writeJson(file, data) {
   writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
-const isOurs = (entry) => {
-  try {
-    return JSON.stringify(entry).includes("continue-hook");
-  } catch {
-    return false;
+/** The command a hook entry runs, whichever field the host uses. */
+const commandOf = (entry) => {
+  if (!entry || typeof entry !== "object") return null;
+  const cmd = entry.command ?? entry.bash;
+  return typeof cmd === "string" ? cmd : null;
+};
+
+/**
+ * True only for an entry that runs a script *inside our runtime directory*.
+ *
+ * Substring matching on "continue-hook" was wrong: it also matched a user's
+ * own `~/bin/continue-hook-backup.sh`, whose hook we then deleted on install.
+ * The runtime directory is the one path this tool owns, so that is what we
+ * match.
+ */
+/**
+ * Where the portable skill goes.
+ *
+ * Writing into all fifteen skill directories created fifteen host folders in a
+ * home directory that may only have one agent installed — the README says
+ * "every host on this machine", not "create the hosts". Only hosts that are
+ * actually present get the skill; `.agents` is the Agent Skills standard
+ * location and is always written.
+ */
+const skillTargetDirs = () => {
+  const always = [".agents/skills"];
+  const present = SKILL_DIRS.filter((dir) => {
+    if (always.includes(dir)) return true;
+    // ~/.claude/skills is present when ~/.claude is.
+    return existsSync(path.join(expand(dir), ".."));
+  });
+  return present.length ? present : always;
+};
+
+const configPath = (def) => expand(def.config ?? def.target ?? ".");
+
+/** Host directories this tool has actually written a hook into. */
+const installedHosts = () => {
+  const out = [];
+  for (const host of HOST_NAMES) {
+    const def = HOSTS[host];
+    if (def.kind === "skills" || def.kind === "file" || def.kind === "dsh") continue;
+    const data = readJson(expand(def.config));
+    const key =
+      def.kind === "cursor-stop" ? "stop" : def.kind === "copilot-stop" ? "agentStop" : def.kind === "gemini-after" ? "AfterAgent" : "Stop";
+    const list = data?.hooks?.[key];
+    if (!Array.isArray(list)) continue;
+    if (list.some((g) => isOurs(g) || (Array.isArray(g?.hooks) && g.hooks.some(isOurs)))) out.push(host);
   }
+  return out;
+};
+
+const isOurs = (entry) => {
+  const cmd = commandOf(entry);
+  if (!cmd) return false;
+  const normalized = cmd.replace(/\\/g, "/");
+  // Our own runtime directory, plus the same layout under a different HOME —
+  // a machine that moved its home directory still has to be able to clean up
+  // after itself.
+  return (
+    normalized.includes(`${RUNTIME_DIR.replace(/\\/g, "/")}/`) ||
+    normalized.includes("/.hermes/continue-hook/")
+  );
 };
 
 /** Replace our own hook entry inside a host config, keeping everything else. */
@@ -256,7 +316,7 @@ function installHost(host, opts) {
   const results = [];
 
   if (def.kind === "skills") {
-    for (const dir of SKILL_DIRS) {
+    for (const dir of opts.skillsExplicit ? SKILL_DIRS : skillTargetDirs()) {
       const target = path.join(expand(dir), "continue-hook", "SKILL.md");
       const ok = copyIfMissing(path.join(PKG_ROOT, "skills", "continue-hook", "SKILL.md"), target, opts.dryRun);
       results.push({ path: target, ok });
@@ -407,6 +467,18 @@ Event log:    ~/.hermes/continue-hook-events.jsonl`);
     }
     for (const r of results) {
       if (!r.ok) console.log(`  ! skipped (source missing): ${r.path}`);
+    }
+  }
+
+  if (uninstall) {
+    // The runtime directory holds executable Python. Leaving it behind means
+    // "uninstalled" still leaves runnable code in the home directory.
+    const stillUsed = installedHosts();
+    if (stillUsed.length) {
+      console.log(`\nRuntime kept: ${RUNTIME_DIR} (still used by ${stillUsed.join(", ")})`);
+    } else if (existsSync(RUNTIME_DIR) && !opts.dryRun) {
+      rmSync(RUNTIME_DIR, { recursive: true, force: true });
+      console.log(`\nRuntime removed: ${RUNTIME_DIR}`);
     }
   }
 

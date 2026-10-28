@@ -8,7 +8,7 @@
  */
 import assert from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -149,6 +149,48 @@ await test("install never deletes the user's own flat hooks", () => {
   assert.ok(after.includes("my-own-cursor-hook.sh"), "the user's hook must survive");
 });
 
+await test("a user hook that merely shares our name is not ours", () => {
+  // isOurs() used to match the substring "continue-hook", so a user's own
+  // ~/bin/continue-hook-backup.sh was treated as our entry and deleted.
+  const home = freshHome();
+  mkdirSync(path.join(home, ".cursor"), { recursive: true });
+  writeFileSync(
+    path.join(home, ".cursor", "hooks.json"),
+    JSON.stringify({
+      version: 1,
+      hooks: { stop: [{ command: "~/bin/continue-hook-backup.sh" }, { command: "my-linter --quiet" }] },
+    }),
+  );
+
+  runCli(["install", "--host", "cursor"], home);
+  const installed = JSON.stringify(readJson(path.join(home, ".cursor", "hooks.json")));
+  assert.ok(installed.includes("continue-hook-backup.sh"), "install deleted the user's own script");
+  assert.ok(installed.includes("my-linter --quiet"), "install deleted an unrelated hook");
+
+  runCli(["uninstall", "--host", "cursor"], home);
+  const after = JSON.stringify(readJson(path.join(home, ".cursor", "hooks.json")));
+  assert.ok(after.includes("continue-hook-backup.sh"), "uninstall deleted the user's own script");
+  assert.ok(after.includes("my-linter --quiet"), "uninstall deleted an unrelated hook");
+  assert.ok(!after.includes(".hermes/continue-hook/"), "our hook must be gone");
+});
+
+await test("uninstall removes a stale hook from a previous home directory", () => {
+  // A user who moved their home directory still has an entry pointing at the
+  // old runtime path. Uninstall has to take it with it, or two hooks fire.
+  const home = freshHome();
+  mkdirSync(path.join(home, ".cursor"), { recursive: true });
+  writeFileSync(
+    path.join(home, ".cursor", "hooks.json"),
+    JSON.stringify({
+      version: 1,
+      hooks: { stop: [{ command: "python3 /old/home/.hermes/continue-hook/cursor/stop_hook.py" }] },
+    }),
+  );
+  runCli(["uninstall", "--host", "cursor"], home);
+  const after = JSON.stringify(readJson(path.join(home, ".cursor", "hooks.json")));
+  assert.ok(!after.includes(".hermes/continue-hook/"), "the stale entry survived");
+});
+
 await test("every JSON host gets its own config file", () => {
   const home = freshHome();
   const res = runCli(["install", "--host", "all"], home);
@@ -177,6 +219,29 @@ await test("the skills layer lands in the skill directories", () => {
     assert.ok(existsSync(skill), `${skill} must exist`);
     assert.ok(readFileSync(skill, "utf8").includes("continue-hook"));
   }
+});
+
+await test("--host all does not create skill dirs for agents you do not have", () => {
+  // It used to write into fifteen skill directories, inventing host folders in
+  // a home directory that may have one agent installed.
+  const home = freshHome();
+  runCli(["install", "--host", "all"], home);
+  const created = readdirSync(home, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name);
+  for (const absent of [".factory", ".grok", ".devin", ".antigravity", ".kimi", ".dsh"]) {
+    assert.ok(!created.includes(absent), `${absent} was created for a host that is not installed`);
+  }
+  assert.ok(created.includes(".agents"), "the standard skill location is always written");
+});
+
+await test("uninstall removes the runtime so nothing executable is left behind", () => {
+  const home = freshHome();
+  runCli(["install", "--host", "claude-code"], home);
+  const runtime = path.join(home, ".hermes", "continue-hook");
+  assert.ok(existsSync(runtime), "install should create the runtime");
+  runCli(["uninstall", "--host", "claude-code"], home);
+  assert.ok(!existsSync(runtime), "uninstall left executable Python behind");
 });
 
 await test("check reports what is installed", () => {
