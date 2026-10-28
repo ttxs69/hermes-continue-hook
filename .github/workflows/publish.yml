@@ -79,10 +79,14 @@ jobs:
         run: npm pack --dry-run
       - name: Dry run
         if: ${{ inputs.dry-run }}
-        run: npm publish --dry-run --access public
+        run: npm publish --dry-run --access public --registry=https://registry.npmjs.org/
       - name: Publish
         if: ${{ inputs.dry-run != true }}
-        run: npm publish --access public --provenance
+        # --registry is explicit on purpose: a machine-level .npmrc pointing at
+        # a registry mirror would otherwise publish into the mirror. npm's
+        # trusted publishing (OIDC) also derives its audience from the
+        # registry host, so the audience must be registry.npmjs.org.
+        run: npm publish --access public --provenance --registry=https://registry.npmjs.org/
         env:
           # Empty when trusted publishing is configured — npm then uses OIDC.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

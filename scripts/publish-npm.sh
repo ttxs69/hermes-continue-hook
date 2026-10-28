@@ -29,19 +29,29 @@ if ! gh secret list | grep -q '^NPM_TOKEN'; then
   echo "✗ the repository has no NPM_TOKEN secret."
   echo
   echo "  The first npm release cannot use OIDC (npm requires the package to"
-  echo "  exist first), so it needs an automation token:"
+  echo "  exist first), so it needs a token:"
   echo
   echo "    1. create an npm account:      https://www.npmjs.com/signup"
-  echo "    2. create an automation token: https://www.npmjs.com/settings/ttxs69/access-tokens"
-  echo "       (Granular Access Token → Packages: read & write, publish: yes;"
-  echo "        or a classic Automation Token)"
-  echo "    3. store it:                    gh secret set NPM_TOKEN"
+  echo "    2. turn on 2FA (auth-and-writes)"
+  echo "    3. create a token:             https://www.npmjs.com/settings/ttxs69/access-tokens"
+  echo "       npm removed legacy automation tokens in Nov 2025 — create a"
+  echo "       Granular Access Token with:"
+  echo "         Packages and scopes → Read and write (publish and stage)"
+  echo "         Select Packages        → All Packages (the package does not"
+  echo "                                   exist yet, so it cannot be picked)"
+  echo "         Bypass 2FA             → on"
+  echo "         Expiration             → as short as possible"
+  echo "    4. store it:                    gh secret set NPM_TOKEN"
   echo
   echo "  Then re-run this script. For later releases, configure trusted"
-  echo "  publishing once and drop the secret:"
+  echo "  publishing once and drop the secret (needs npm >= 11.15.0):"
   echo
-  echo "    npm trust hermes-continue-hook --repo ttxs69/hermes-continue-hook \\"
-  echo "      --file publish.yml --env npm --allow-publish"
+  echo "    npm trust github hermes-continue-hook \\"
+  echo "      --repo ttxs69/hermes-continue-hook --file publish.yml --env npm \\"
+  echo "      --allow-publish --registry=https://registry.npmjs.org/"
+  echo
+  echo "  Note: a token with bypass-2FA may NOT configure a trusted publisher —"
+  echo "  that call needs an interactive 2FA challenge."
   exit 2
 fi
 
