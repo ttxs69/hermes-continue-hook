@@ -149,8 +149,21 @@ class TestThePublishWorkflow(unittest.TestCase):
         """A poisoned cache entry in a release build would be published."""
         self.assertIn("package-manager-cache: false", self.text)
 
-    def test_it_uses_a_current_npm(self) -> None:
-        self.assertIn("npm install -g npm@latest", self.text)
+    def test_it_does_not_upgrade_npm(self) -> None:
+        """The node version pins the npm version.
+
+        This used to assert the opposite — that the workflow runs
+        `npm install -g npm@latest`. That upgrade is what made the publish
+        job behave differently from every other job in the repository: npm 12
+        installs a different layout, and the dsh runtime test failed on a
+        missing tsc while CI was green. "latest" is not a version, so a gate
+        that depends on it cannot be reproduced.
+
+        node 24 ships npm 11.19.x, which meets both of npm's requirements
+        (trusted publishing 11.5.1+, `npm stage publish` 11.15.0+).
+        """
+        self.assertNotIn("npm install -g npm@latest", self.text)
+        self.assertIn("npm --version", self.text)
 
 
 class TestNoSecretIsNeeded(unittest.TestCase):

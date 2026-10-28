@@ -1,4 +1,4 @@
-import { it } from "vitest";
+import { it, afterAll } from "vitest";
 
 /**
  * Runtime test for the DeepSeek Harness (dsh) plugin.
@@ -15,7 +15,15 @@ import { it } from "vitest";
  *   node tests/test_dsh.mjs
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, cpSync, existsSync, readdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  cpSync,
+  existsSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +32,21 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_SRC = path.join(REPO, "adapters", "dsh", "src", "index.ts");
 
 const WORK = mkdtempSync(path.join(tmpdir(), "ch-dsh-"));
+// The scratch directory holds a node_modules with the real dsh packages —
+// about 75 MB. Without this the test leaves one behind on every run, and
+// they pile up: 136 of them filled 5 GB of the disk before anyone noticed.
+//
+// `process.on("exit")` does not fire in a vitest worker, so the cleanup is
+// registered as an `afterAll` hook below instead.
+function cleanupScratch() {
+  try {
+    rmSync(WORK, { recursive: true, force: true });
+  } catch {
+    // best effort — a leftover directory must never fail the test
+  }
+}
 const HOME = path.join(WORK, "home");
+afterAll(cleanupScratch);
 mkdirSync(path.join(HOME, ".hermes", "continue-hook"), { recursive: true });
 // the plugin looks for the shared detector in the installed layout
 cpSync(path.join(REPO, "detector.py"), path.join(HOME, ".hermes", "continue-hook", "detector.py"));
@@ -78,6 +100,15 @@ execFileSync(
   NPM,
   [
     "install",
+    // --prefix pins the install location. Without it npm resolves the install
+    // itself and may land somewhere else — it walks up looking for a
+    // package.json. The failure mode is silent and nasty: npm reports
+    // "added 17 packages" while the directory it was supposed to fill stays
+    // empty, so the test dies on a missing file instead of on a broken
+    // install. The release workflow's mid-job npm upgrade is what exposed
+    // this — it was the only job where the install landed elsewhere.
+    "--prefix",
+    WORK,
     "--no-package-lock",
     "--no-audit",
     "--no-fund",

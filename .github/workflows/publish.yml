@@ -7,7 +7,7 @@ name: Publish
 #  1. **Trusted publishing (OIDC) is the way.** The npm CLI exchanges the
 #     workflow's OIDC token for a short-lived registry token, so no long-lived
 #     secret sits in the repository. Requirements (npm docs):
-#       * npm CLI 11.5.1+  →  `npm install -g npm@latest` below
+#       * npm CLI 11.5.1+  →  node 24 ships npm 11.19.x, which qualifies
 #       * Node 22.14.0+    →  node-version 24 below
 #       * `id-token: write` permission  →  set at workflow level
 #       * a *public* repository and a public package  →  provenance is
@@ -123,27 +123,38 @@ jobs:
           echo "node: $(node --version)"
           echo "npm:  $(npm --version) at $(command -v npm)"
       # The gate below runs on the npm that setup-node installed, BEFORE the
-      # upgrade. `npm install -g npm@latest` replaces the whole global npm
+      # upgrade. A global npm upgrade replaces the whole global npm
       # installation ("removed 8 packages, and changed 77 packages"), and the
       # replacement briefly leaves the `npm` on PATH pointing at a removed
       # tree. Anything that shells out to `npm` after that point fails with a
       # bare ENOENT — which is exactly what the dsh runtime test did, and it
       # read as "a dependency is missing" rather than "npm moved".
       #
-      # So: run the gate first (stable npm), upgrade afterwards, and prove the
-      # upgrade left a working npm behind.
+      # So there is no upgrade at all: node 24 ships an npm that already meets
+      # both requirements, and one node version means one npm in every job.
       - name: Check what is already published
         run: |
           npm view @ttxs69/hermes-continue-hook versions --json || echo "not published yet"
       - name: Pack and show the contents
         run: npm pack --dry-run
-      - name: Use a current npm (11.5.1+ for trusted publishing, 11.15.0+ for staging)
+      - name: Check the npm that ships with this node
         run: |
-          npm install -g npm@latest
-          # The upgrade replaces the global npm tree; make sure the `npm` that
-          # is still on PATH is the new one and actually runs.
+          # Node 24 ships npm 11.19.x, which already satisfies both npm
+          # requirements for this workflow: trusted publishing needs 11.5.1+
+          # and `npm stage publish` needs 11.15.0+.
+          #
+          # There used to be a global npm upgrade to the newest release here.
+          # It was unnecessary and it was also the reason this workflow behaved
+          # differently from every other job in the repository: "latest" is
+          # not a version, so the publish job ran npm 12 while CI ran npm 10,
+          # and npm 12 installs into a different layout (no .bin shim, and in
+          # one environment not even a node_modules directory in the target).
+          # The dsh runtime test then failed on a missing tsc — a symptom of
+          # the environment differing, not of the plugin being broken.
+          #
+          # So: no upgrade. One node version, one npm, everywhere.
+          node --version
           npm --version
-          command -v npm
       - name: Dry run
         if: ${{ inputs.dry-run }}
         run: npm publish --dry-run --access public --registry=https://registry.npmjs.org/

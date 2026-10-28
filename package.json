@@ -35,7 +35,8 @@
     "patch-mode/"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=18",
+    "npm": ">=11.15.0"
   },
   "scripts": {
     "test": "python3 -m unittest discover -s tests && vitest run",
