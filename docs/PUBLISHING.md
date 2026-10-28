@@ -84,6 +84,11 @@ gh secret set NPM_TOKEN
 
 This token is for **one** publish. Delete it in step 5.
 
+**After the first release the repository holds no secret at all** — the
+publish workflow authenticates with the CI provider's OIDC identity, and npm
+attaches the provenance attestation by itself. A release tagged with an empty
+secret list is the proof that the trusted publisher is configured correctly.
+
 ### 3. Publish
 
 ```bash
