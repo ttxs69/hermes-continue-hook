@@ -77,10 +77,21 @@ if ! git apply --check "$PATCH" 2>/dev/null; then
 fi
 
 git apply "$PATCH"
-# The patch carries agent/continue_hook.py itself (it is the generated build of
-# the shared engine). Copying a second file over it would put two different
-# implementations on top of each other — that is exactly the drift this mode
-# used to have.
+
+# The generated module is copied in, NOT carried by the patch.
+#
+# It used to be carried by the patch, and that was a second implementation
+# waiting to happen: `core-gate.patch` was maintained by hand while
+# `patch-mode/continue_hook.py` was generated from the shared engine, and the
+# two drifted apart — the patch carried a detector without
+# `strip_code_and_links` (the fix for a reply ending in a code block) and with
+# an older trigger list. Patch mode then ran different rules from plugin mode
+# on the same machine, which is the exact failure the generator was introduced
+# to prevent.
+#
+# So: the patch carries only the core edits, and the file itself comes from
+# the one generated copy. There is nothing left to drift.
+cp "$HERE/continue_hook.py" "$ROOT/agent/continue_hook.py"
 
 cat <<'EOF'
 ✓ installed. Two steps to switch it on:
