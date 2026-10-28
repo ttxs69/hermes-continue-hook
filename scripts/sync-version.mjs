@@ -13,6 +13,7 @@
  * and the tag. It can also be run by hand.
  */
 
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,7 +62,34 @@ function updateJson(relativePath) {
   if (data.version === version) return { path: relativePath, changed: false };
   data.version = version;
   writeFileSync(absolute, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  // JSON.stringify puts every array element on its own line. Prettier does
+  // not: it collapses an array that fits on one line, which is how these
+  // files were written before. Rewriting them without prettier therefore
+  // broke `prettier --check` on every release — and the release gate runs
+  // that check, so the version bump made the release fail. Format the file
+  // the way the repository formats it.
+  formatWithPrettier(absolute);
   return { path: relativePath, changed: true };
+}
+
+/**
+ * Format a file with the repository's own prettier, if it is available.
+ *
+ * `npm version` runs this script from the repository, where prettier is
+ * installed. If it is not (a stripped checkout, a consumer running the
+ * script by hand), the file keeps the JSON.stringify formatting — which is
+ * valid, just not what prettier would produce.
+ */
+function formatWithPrettier(absolute) {
+  try {
+    execFileSync(
+      "npx",
+      ["--no-install", "prettier", "--write", "--log-level", "silent", absolute],
+      { cwd: ROOT, stdio: "ignore" },
+    );
+  } catch {
+    // prettier is not installed here — the file is still valid JSON.
+  }
 }
 
 function updateText({ path: relativePath, pattern }) {

@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.3.2 (2026-10-28)
+
+- **The patch no longer carries its own copy of the detector.**
+  `core-gate.patch` embedded `agent/continue_hook.py` by hand while the file
+  next to it was generated from the shared engine — and the two drifted. The
+  copy in the patch was missing `strip_code_and_links` (so a reply ending in
+  a code block counted as a question) and carried an older trigger list, which
+  meant **patch mode and plugin mode ran different rules on the same
+  machine**. The patch now carries only the core edits; the installer copies
+  the generated module in. Three tests lock this down, one of them comparing
+  the two modules' behaviour on real sentences rather than their bytes.
+
+- **The release gate no longer needs the npm registry.** `scripts/check.sh`
+  always said it ran "everything CI runs except the dsh typecheck, which needs
+  the npm registry" — but `vitest run --coverage` picked up the dsh suite
+  anyway, so `npm publish` was doing a network install in the middle of the
+  publish. The gate is now genuinely offline (verified with the registry
+  pointed at an unreachable address); CI still runs the dsh suite, in its own
+  job.
+
+- **One node version, one npm, everywhere.** The publish workflow ran
+  `npm install -g npm@latest` while every other job ran the npm that ships
+  with its node — so the publish job was the only one with a different npm,
+  and npm 12 installs a different layout. "Latest" is not a version. The
+  upgrade was never needed (node 24 ships npm 11.19.x, which satisfies both
+  of npm's requirements). `.nvmrc` now pins the node version, the gate
+  refuses to run on a different one, and four tests enforce it.
+
+- **Fixed: the release could not be published at all.** The publish workflow
+  never installed the Python toolchain, and `npm publish` runs the package's
+  own `prepublishOnly` script — so the publish died on "ruff: command not
+  found" *after* the tag was pushed.
+
+- **Fixed: the version bump broke the release.** The version hook rewrote the
+  plugin manifests with `JSON.stringify`, which puts every array element on
+  its own line; prettier wants short arrays on one line. The bump therefore
+  made `prettier --check` fail, and the release gate runs that check — so the
+  release failed on its own version bump. The hook now formats what it
+  writes.
+
+- **Fixed: the dsh test leaked 75 MB per run.** 136 leftover directories had
+  filled 5 GB of disk on a development machine; the test now removes its
+  scratch directory.
+
+- **New: git hooks.** `npm install` installs a `pre-commit` (the fast checks,
+  on the staged files) and a `pre-push` (the whole gate), so a mismatch with
+  CI shows up before the push instead of after it. Both refuse to run on the
+  wrong node version.
+
+- **The README now says how to verify the hook works** — one command that
+  reproduces the whole chain, plus the measured numbers from the plugin's own
+  event log (60 evaluations, 32 nudges, 53% hit rate).
+
 ## 1.3.1 (2026-10-28)
 
 - **The npm release now runs without a stored secret.** The publish workflow
