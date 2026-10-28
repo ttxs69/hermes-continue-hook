@@ -285,7 +285,7 @@ of date.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests   # 144 tests: detector, plugin, 8 adapters, dsh/pi contracts
+python3 -m unittest discover -s tests   # 184 tests: detector, plugin, 8 adapters, dsh/pi contracts
 node tests/test_opencode.mjs            # 13 tests: OpenCode plugin against a mock SDK client
 node tests/test_installer.mjs           # 33 tests: install / idempotence / uninstall / non-destruction
 node tests/test_dsh.mjs                 # 7 tests: dsh plugin, compiled against the real dsh packages
@@ -363,7 +363,7 @@ npm install               # dev tooling: eslint, tsc, typescript-eslint
 |---|---|---|---|
 | Python | **ruff** (check + format) | `pyproject.toml` | every push |
 | Python | **mypy** (strict-ish) | `pyproject.toml` | every push |
-| Python | **pytest** + **coverage** | `pyproject.toml` (`fail_under = 65`) | every push |
+| Python | **pytest** + **coverage** | `pyproject.toml` (`fail_under = 78`) | every push |
 | Python | **unittest** (dependency-free) | — | 3.10 / 3.11 / 3.12 / 3.13 |
 | JS / TS | **eslint** (flat config, typescript-eslint) | `eslint.config.mjs` | every push |
 | TS | **tsc** (`strict`, `noUnusedLocals`) | `tsconfig.pi.json`, `adapters/dsh/typecheck.sh` | every push |
@@ -379,7 +379,7 @@ patch mode 71%, `_common` 69%, `hookctl` 63%) and the build fails below 65%.
 formatter. It is still linted.
 
 ```bash
-python -m unittest discover -s tests     # 144 tests
+python -m unittest discover -s tests     # 184 tests
 python -m pytest --cov                   # same suite + coverage floor
 node tests/test_opencode.mjs             # 13
 node tests/test_installer.mjs            # 33
