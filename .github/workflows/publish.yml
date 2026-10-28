@@ -39,22 +39,15 @@ name: Publish
 # therefore short-lived by design, and the trusted publisher takes over right
 # after the first release — see the sequence below.)
 #
-# So the sequence for the first release is:
-#
-#   a. create a bypass-2FA granular access token (read+write, short life)
-#   b. gh secret set NPM_TOKEN       → the token, in the repository's secrets
-#   c. push the v1.3.0 tag           → this workflow publishes it
-#   d. npm trust github ... --allow-publish
-#      → from now on this workflow needs no secret at all
-#   e. gh secret delete NPM_TOKEN
-#
-# Steps a–c are one-time. After the trusted publisher exists, every later
-# release is a tag push and a direct publish — OIDC authenticates by workflow
-# identity, so no token and no 2FA prompt are involved.
+# The package exists on the registry and the trusted publisher is
+# configured, so this workflow authenticates with the CI provider's OIDC
+# identity: the repository holds no npm credential, and npm attaches the
+# provenance attestation by itself. A release is made by pushing a semver
+# tag — see scripts/publish-npm.sh.
 #
 # The workflow below publishes directly, and falls back to staging if the
-# registry refuses the direct publish (a token without bypass 2FA). Staging
-# never needs 2FA; only the approval does.
+# registry refuses the direct publish. Staging never needs 2FA; only the
+# approval does.
 
 on:
   push:
@@ -146,8 +139,8 @@ jobs:
             echo "::notice::  npm stage list --registry=https://registry.npmjs.org/"
             echo "::notice::  npm stage approve <stage-id> --registry=https://registry.npmjs.org/"
           fi
-        env:
-          # Empty when trusted publishing is configured — npm then uses OIDC.
-          # Only the *first* release needs this, and only until step (e) of
-          # the header comment has been done.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # No NODE_AUTH_TOKEN. The repository holds no npm credential: npm
+        # authenticates this publish by the workflow's OIDC identity, which is
+        # what the trusted publisher on the package is configured for. A
+        # secret here would be a secret to steal, and it would silently become
+        # the path of least resistance if the OIDC setup ever broke.

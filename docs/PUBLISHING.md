@@ -3,8 +3,57 @@
 The npm package is published by CI, from a git tag.
 
 ```
-git tag → .github/workflows/publish.yml → npm publish
+./scripts/publish-npm.sh patch   →  tag + push  →  npm publish
 ```
+
+## Releasing: the whole procedure
+
+One command, and it does the four things in the order the OpenJS Foundation's
+secure-release guidance puts them
+([secure-releases.md](https://github.com/openjs-foundation/security-wg/blob/main/docs/Secure_Releases/secure-releases.md)):
+
+```bash
+./scripts/publish-npm.sh patch        # 1.3.1 → 1.3.2
+./scripts/publish-npm.sh minor        # 1.3.2 → 1.4.0
+./scripts/publish-npm.sh major        # 1.4.0 → 2.0.0
+./scripts/publish-npm.sh --version 2.0.0-beta.1
+./scripts/publish-npm.sh --dry-run    # ask CI to pack, publish nothing
+```
+
+| Step | What it does | Why |
+|---|---|---|
+| **1. safety checks** | refuses unless the tree is clean, you are on `main`, `main` matches `origin/main`, and the whole gate is green | *"It can be easy to forget to run steps before publishing"* |
+| **2. prepare** | `npm version` bumps the version, the `version` hook syncs **13 files** and creates the changelog section, and you are asked to fill it in | the version lived in 13 places; they drifted, and a release with no changelog entry is a release nobody can find out about |
+| **3. publish** | commits, tags `vX.Y.Z`, pushes; CI publishes | *"don't make a new release automatically, but make sure that a human has intentionally said 'it's time to publish a new version, here's the version number it will use'"* |
+
+Two details worth knowing:
+
+- **The publish happens only after a pushed semver tag** — never on a merge to
+  the default branch. That is the OpenJS guidance verbatim.
+- **`prepublishOnly` runs the full gate.** The same `./scripts/check.sh` that
+  CI runs is wired as `prepublishOnly`, so a package published by *any* route
+  — a script, a laptop, a fork — is checked first. `prepack` cleans the
+  tarball, so `npm pack` and `npm publish` produce the same contents.
+
+### What is protected
+
+| Control | What it stops |
+|---|---|
+| `main` is a protected branch (PR + all 13 CI checks + no force-push) | a compromised account pushing straight to the release branch |
+| `v*` tags are immutable (GitHub ruleset) | a release tag being moved to a different commit after the fact |
+| the `npm` environment | the publish job runs in a named environment, so the trusted-publisher identity includes it |
+| `id-token: write` on the publish job only | every other workflow runs with a read-only token |
+| no npm secret in the repository | nothing to steal; the publish is authenticated by the CI provider's OIDC identity |
+| provenance on every release | a consumer can verify which workflow and commit built the tarball |
+
+### Where each control comes from
+
+- Tag immutability, branch protection and `id-token: write` are what the
+  [OpenSSF Scorecard](https://github.com/ossf/scorecard/blob/main/docs/checks.md)
+  checks for: *Branch-Protection*, *Pinned-Dependencies*, *Token-Permissions*,
+  *Signed-Releases*.
+- The `prepublishOnly` / `prepack` split and the "publish on an explicit
+  request" rule are from the OpenJS secure-release guidance linked above.
 
 ## The 2026 rules, in one place
 
