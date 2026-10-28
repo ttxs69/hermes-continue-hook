@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+# pre-push — the same gate CI runs, before the push instead of after it.
+#
+# This is the hook that earns its keep. The failures that cost us a release
+# were all of the form "the local run passed and CI did not" — a different
+# node, a different npm, a network install in the middle of the gate. A
+# pre-commit hook cannot see any of that; running the real gate here can.
+#
+# It takes about a minute. That is the price of finding out before the push
+# instead of after it.
+#
+# Bypass once with: git push --no-verify
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+# scripts/check.sh refuses to run on the wrong node, and excludes the one
+# suite that needs the npm registry — so this hook works offline.
+./scripts/check.sh
+
+exit 0

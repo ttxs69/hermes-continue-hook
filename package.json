@@ -39,6 +39,7 @@
     "npm": ">=11.15.0"
   },
   "scripts": {
+    "prepare": "husky",
     "test": "python3 -m unittest discover -s tests && vitest run",
     "test:py": "python3 -m unittest discover -s tests",
     "test:js": "vitest run",
@@ -72,6 +73,7 @@
     "@types/node": "26.6.5",
     "@vitest/coverage-v8": "5.0.5",
     "eslint": "10.13.0",
+    "husky": "9.1.7",
     "prettier": "3.9.10",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1",

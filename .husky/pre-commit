@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+# pre-commit — the fast gate, on the files you are committing.
+#
+# Why a separate pre-push hook: the full gate takes ~60 seconds (it runs the
+# whole Python and JavaScript suites). That is fine before a push and not
+# fine before every commit. This hook runs the checks that are cheap enough
+# to run every time, and only on the files that changed.
+#
+# What this can and cannot catch: formatting and type errors. It cannot
+# catch the failures that actually cost us a release — those were all
+# "the local environment differs from CI's", which is what the pre-push hook
+# and CI are for.
+#
+# Bypass once with: git commit --no-verify
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+# The toolchain must be the one the workflows use — same rule as
+# scripts/check.sh, and the reason it is checked here first: a commit made
+# with the wrong node produces a different result than the same commit in CI.
+PINNED_MAJOR="$(cat .nvmrc 2>/dev/null | cut -d. -f1)"
+if [ -n "${PINNED_MAJOR}" ]; then
+  CURRENT_MAJOR="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+  if [ -n "${CURRENT_MAJOR}" ] && [ "${CURRENT_MAJOR}" != "${PINNED_MAJOR}" ]; then
+    echo "node ${CURRENT_MAJOR} is running; .nvmrc pins ${PINNED_MAJOR}." >&2
+    echo "Run 'nvm use' so this commit matches CI." >&2
+    exit 1
+  fi
+fi
+
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR)"
+
+PY_FILES="$(echo "$STAGED" | grep '\.py$' || true)"
+JS_FILES="$(echo "$STAGED" | grep -E '\.(js|mjs|ts|json|yml)$' || true)"
+
+if [ -n "${PY_FILES}" ]; then
+  echo "== ruff (staged python)"
+  # shellcheck disable=SC2086
+  ruff check $PY_FILES
+  # shellcheck disable=SC2086
+  ruff format --check $PY_FILES
+fi
+
+if [ -n "${JS_FILES}" ]; then
+  echo "== prettier (staged javascript)"
+  # shellcheck disable=SC2086
+  npx --no-install prettier --check $JS_FILES
+fi
+
+echo "== mypy"
+mypy
+
+exit 0
