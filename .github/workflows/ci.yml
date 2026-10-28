@@ -92,7 +92,10 @@ jobs:
       - name: Check the tarball carries the runtime
         run: |
           set -euo pipefail
+          # `npm pack --json` must be the only thing on stdout — a prepack
+          # script that prints there would break the JSON.
           npm pack --json > pack.json
+          node -e "JSON.parse(require('fs').readFileSync('pack.json','utf8'))"
           files=$(node -e "const p=require('./pack.json');console.log(p[0].files.map(f=>f.path).join('\n'))")
           echo "$files" | grep -q "bin/continue-hook.js"
           echo "$files" | grep -q "hookctl.py"

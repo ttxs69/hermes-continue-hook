@@ -44,4 +44,6 @@ if (!existsSync(ROOT)) {
   process.exit(1);
 }
 walk(ROOT);
-console.log(`clean-pack: removed ${removed} build artefact(s)`);
+// stderr, not stdout: `npm pack --json` writes its JSON to stdout, and a
+// stray line would break every consumer of that JSON.
+console.error(`clean-pack: removed ${removed} build artefact(s)`);
