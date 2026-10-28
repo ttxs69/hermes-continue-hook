@@ -118,9 +118,17 @@ class TestThePythonComplexityGate(unittest.TestCase):
 
 
 class TestTheTypeScriptComplexityGate(unittest.TestCase):
-    """eslint's `complexity` rule, configured in eslint.config.mjs."""
+    """eslint's `complexity` rule, configured in eslint.config.mjs.
+
+    The rule needs eslint, which lives in node_modules. A job that runs only
+    the Python suite has no node_modules, and this is not a Python check —
+    so the class skips itself there rather than failing a job it does not
+    belong to. The JS job (vitest + coverage) and the eslint job both run it.
+    """
 
     def setUp(self) -> None:
+        if not (ROOT / "node_modules" / "eslint").exists():
+            self.skipTest("eslint is not installed (node_modules missing)")
         self.config = ESLINT_CONFIG.read_text(encoding="utf-8")
 
     def test_the_rule_is_enabled_with_a_ceiling(self) -> None:
