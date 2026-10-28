@@ -2,7 +2,7 @@
 
 **Stop your agent from ending every turn with a question it could answer itself.**
 
-> 「Do you want me to continue?」 · 「要我顺便把这个也做了吗？」 · 「Want me to run the tests?」
+> "Do you want me to continue?" · "Want me to run the tests?" · "要我顺便把这个也做了吗？" (Chinese)
 
 Your agent finishes the work — then asks whether it may do the next obvious
 thing. It hands you a decision it was already able to make, and you spend a
@@ -11,7 +11,7 @@ turn on a one-word answer. On a busy day that is dozens of wasted round-trips.
 continue-hook catches that ending, asks the agent to re-check it once, and lets
 it finish the work.
 
-**别再问了，直接做完。**
+**Stop asking. Just finish the work.**
 
 ```text
 Claude Code · Codex CLI · Qwen Code · Cursor · GitHub Copilot CLI ·
@@ -30,11 +30,13 @@ the question was legitimate.
 [![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
 [![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+[简体中文](README.zh-CN.md)
+
 ## Why
 
 Agents constantly end turns with questions they could answer themselves:
 
-> 要不要我把这个写进 skill？
+> "Should I add this to the skill?"
 
 The user then has to say "yes" for something the agent was allowed to do all
 along. Every such turn is a wasted round-trip — and on a busy day, dozens of
@@ -59,9 +61,10 @@ The plugin itself cannot modify Hermes core, so in **plugin mode** it works
 *one turn later*:
 
 ```
-You:    帮我优化 README
-Bot:    要不要我顺便也把示例补上？        ← turn 1 ends; the question slips out
-Bot:    【自动续】已直接完成：README 优化 + 示例补充。验证：lint 通过。  ← turn 2, seconds later
+You:    Tighten the README install steps
+Bot:    Want me to also tighten the examples?   ← turn 1 ends; the question slips out
+Bot:    [auto-continue] Done: README install steps tightened + examples tightened.
+        Verification: lint passed.             ← turn 2, seconds later
 ```
 
 The nudge is injected as a new user-role message into the **same session**
@@ -134,7 +137,7 @@ to defaults (it can never crash the gateway).
 ```bash
 npx @ttxs69/hermes-continue-hook install --host all
 # then ask an agent for something trivial:
-#   "帮我把 README 的安装步骤改短一点"
+#   "Tighten the README install steps"
 # and watch whether it asks permission for things it could just do.
 ```
 
@@ -145,7 +148,7 @@ cat ~/.hermes/continue-hook-events.jsonl | tail -5
 ```
 
 In Hermes, the same numbers are available as `/ch-stats`, and
-`/ch-test 要不要我继续？` dry-runs the detector on any sentence.
+`/ch-test Want me to continue?` dry-runs the detector on any sentence.
 
 ## Verify it works — without waiting for a real conversation
 
@@ -158,8 +161,8 @@ The published package contains the adapter, so this works **before** you
 install anything:
 
 ```bash
-npm pack @ttxs69/hermes-continue-hook --silent   # → ttxs69-hermes-continue-hook-1.3.1.tgz
-tar xzf ttxs69-hermes-continue-hook-1.3.1.tgz
+npm pack @ttxs69/hermes-continue-hook --silent   # → ttxs69-hermes-continue-hook-<version>.tgz
+tar xzf ttxs69-hermes-continue-hook-*.tgz
 
 # 1. the trigger fires on a permission-seeking ending
 printf '%s' '{"last_assistant_message":"好的，已经改完了。\n\n要不要我顺便把示例也补上？"}' \
@@ -210,7 +213,7 @@ was correct.
 ## How it works
 
 ```
-agent turn ends with "…要不要我继续？"
+agent turn ends with "…Want me to continue?"
    ↓ detect (configurable: offer / hand-off / confirm-seek / bare ？)
    ↓ exclude: money, identity, publishing, destructive actions, real blockers
    ↓ nudge the agent to self-check:
