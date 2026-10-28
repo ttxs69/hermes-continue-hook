@@ -201,6 +201,24 @@ that does not affect trusted publishing.
 The CI workflow (`ci.yml`) additionally asserts the tarball carries the
 runtime and contains no build artefacts.
 
+## What the first release actually involved (measured, 2026-10-28)
+
+Recorded because each of these was a surprise that cost a round:
+
+| Finding | Evidence |
+|---|---|
+| The npm account was **not** the GitHub account. It was `sarace`; the repository is `ttxs69`. | `GET /-/whoami` → `{"username":"sarace"}` |
+| **npm usernames cannot be changed.** A new account has to be created and the packages moved. | npm docs: *"It is not currently possible to change your npm username."* |
+| A **scoped package cannot be transferred** to another account — its scope *is* the account name. | npm docs, package transfer page |
+| A token with `bypass_2fa: false` is **refused on a direct publish**. | 401 `{"error":"You must provide a one-time pass..."}` |
+| The same token **can stage**, because staging deliberately does not need 2FA. | `npm stage publish` accepted it |
+| **Scoped packages default to private.** | 402 `{"error":"You must sign up for private packages"}` without `access: public` |
+| **A publish attempt reserves the name for 24 hours**, even if the upload fails. | 403 `"cannot be republished until 24 hours have passed"` — the name is taken, the package does not exist |
+
+The last one is worth remembering: probing the registry with a malformed
+upload is not free. It burns the name for a day. Probe a *scoped* name, or
+probe nothing and publish for real.
+
 ## Verifying and troubleshooting
 
 ```bash

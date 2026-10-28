@@ -2,6 +2,11 @@
 
 ## 1.3.0 (2026-10-28)
 
+- **Published to npm as `@ttxs69/hermes-continue-hook`**, with a SLSA v1
+  provenance attestation (`https://slsa.dev/provenance/v1`) and npm registry
+  signatures. Install with
+  `npx @ttxs69/hermes-continue-hook install --host all`.
+
 - **One decision service.** `hookctl.py` now owns the caps, the per-session
   state and the event log; `detector.py` is pure pattern matching. The Hermes
   plugin, the six shell-hook adapters, the OpenCode plugin, the Pi extension
