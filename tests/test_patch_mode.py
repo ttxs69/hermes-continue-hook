@@ -47,9 +47,35 @@ class TestPatchModeStandalone(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def _fake_hermes_config(self, cfg: dict) -> None:
+        """Pin what the core "config" says, so the test does not depend on the
+        machine it runs on (a dev box has a real Hermes config; CI has none)."""
+        import types
+
+        pkg = types.ModuleType("hermes_cli")
+        pkg.__path__ = []  # type: ignore[attr-defined]
+        cfgmod = types.ModuleType("hermes_cli.config")
+        cfgmod.load_config = lambda: cfg  # type: ignore[attr-defined]
+        saved = {k: sys.modules.get(k) for k in ("hermes_cli", "hermes_cli.config")}
+        sys.modules["hermes_cli"] = pkg
+        sys.modules["hermes_cli.config"] = cfgmod
+
+        def restore():
+            for name, module in saved.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+
+        self.addCleanup(restore)
+
     def test_it_loads_and_nudges(self):
         with tempfile.TemporaryDirectory() as home:
             os.environ["HOME"] = home
+            # The gate is off unless it is switched on, and this test used to
+            # pass locally only because the dev machine's Hermes config had it
+            # enabled — CI has no hermes_cli at all, so it failed there.
+            self._fake_hermes_config({"agent": {"continue_hook_enabled": True}})
             module = self._load(home)
 
             class Agent:
@@ -64,6 +90,7 @@ class TestPatchModeStandalone(unittest.TestCase):
     def test_it_stays_silent_on_a_clean_reply(self):
         with tempfile.TemporaryDirectory() as home:
             os.environ["HOME"] = home
+            self._fake_hermes_config({"agent": {"continue_hook_enabled": True}})
             module = self._load(home)
 
             class Agent:
@@ -72,6 +99,21 @@ class TestPatchModeStandalone(unittest.TestCase):
                 _continue_hook_nudges = 0
 
             self.assertIsNone(module.continue_hook_nudge(Agent(), "已完成，42 项测试全绿。"))
+
+    def test_a_clean_environment_nudges_nothing(self):
+        """Installing the patch must not start nudging by itself."""
+        self._fake_hermes_config({})
+        with tempfile.TemporaryDirectory() as home:
+            os.environ["HOME"] = home
+            os.environ.pop("HERMES_CONTINUE_HOOK", None)
+            module = self._load(home)
+
+            class Agent:
+                session_id = "s3"
+                platform = "cli"
+                _continue_hook_nudges = 0
+
+            self.assertIsNone(module.continue_hook_nudge(Agent(), "要不要我顺便也把示例补上？"))
 
     def test_it_has_no_private_paths(self):
         """The old copy wrote into ~/moneymaker/state/… — not a public path."""
