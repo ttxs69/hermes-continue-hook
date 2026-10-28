@@ -1,28 +1,42 @@
 name: Publish
 
-# Publishing is tag-driven: push a vX.Y.Z tag whose name matches the version
-# in package.json, and this workflow publishes to npm.
+# ── How publishing works here (2026 rules) ───────────────────────────────────
+# npm's rules changed twice in 2026, and both changes matter for a first
+# release:
 #
-# ── How the npm credentials work ────────────────────────────────────────────
-# npm's *trusted publishing* (OIDC) is used when it is available: npm CLI
-# 11.5.1+ exchanges the workflow's OIDC token for a short-lived registry
-# token, so no long-lived secret sits in the repository. Configure it once,
-# after the package exists on npm:
+#  1. **Trusted publishing (OIDC) is the way.** The npm CLI exchanges the
+#     workflow's OIDC token for a short-lived registry token, so no long-lived
+#     secret sits in the repository. Requirements (npm docs):
+#       * npm CLI 11.5.1+  →  `npm install -g npm@latest` below
+#       * Node 22.14.0+    →  node-version 24 below
+#       * `id-token: write` permission  →  set at workflow level
+#       * a *public* repository and a public package  →  provenance is
+#         generated automatically, no `--provenance` flag needed
+#       * the package's `repository.url` must match the GitHub repo exactly
+#         →  it does (see package.json)
+#       * GitHub-hosted runners only — self-hosted is not supported
 #
-#   npm trust hermes-continue-hook \
-#     --repo ttxs69/hermes-continue-hook \
-#     --file publish.yml \
-#     --env npm \
-#     --allow-publish
+#  2. **Staged publishing exists.** `npm stage publish` uploads a version to a
+#     staging area; a maintainer approves it with 2FA and *then* it goes live.
+#     This matters for a *new* package: npm publishes a placeholder version
+#     `0.0.0-stage` so the package exists, which is what makes the trusted
+#     publisher configurable at all (npm requires the package to exist before
+#     a trusted publisher can be set for it).
 #
-# The first publish of a *new* package cannot use OIDC — npm requires the
-# package to already exist on the registry — so it needs an automation token
-# in the `NPM_TOKEN` secret. After that one publish, trusted publishing takes
-# over and the secret can be removed.
+# So the intended sequence for the first release is:
 #
-# Provenance needs: npm CLI >= 9.5.0, a cloud-hosted runner, `id-token: write`
-# (set below), and a public `repository` field in package.json that matches
-# the publish location exactly.
+#   a. npm login (2-hour session) + 2FA on the account
+#   b. npm stage publish            → creates the package (0.0.0-stage)
+#   c. npm stage approve <id>       → 2FA; 1.3.0 goes live
+#   d. npm trust github ... --allow-publish
+#      → from now on this workflow needs no secret at all
+#   e. gh secret delete NPM_TOKEN
+#
+# Steps b and c are one-time. The workflow below then publishes straight to
+# the registry with OIDC, and every later release is a tag push.
+#
+# The `environment: npm` on the publish job is part of the trusted-publisher
+# identity: the environment name has to match what npm has on file, exactly.
 
 on:
   push:
@@ -45,7 +59,7 @@ jobs:
     outputs:
       version: ${{ steps.gate.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: gate
         run: |
           set -euo pipefail
@@ -65,12 +79,16 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          # Node 24 ships npm >= 11.5.1, which is what OIDC publishing needs.
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
-      - name: Use a current npm (11.5.1+ for trusted publishing)
+          # Never cache in a release build: a poisoned cache entry would be
+          # published. npm's own docs say the same.
+          package-manager-cache: false
+      - name: Use a current npm (11.5.1+ for trusted publishing, 11.15.0+ for staging)
         run: npm install -g npm@latest
       - name: Check what is already published
         run: |
@@ -86,7 +104,13 @@ jobs:
         # a registry mirror would otherwise publish into the mirror. npm's
         # trusted publishing (OIDC) also derives its audience from the
         # registry host, so the audience must be registry.npmjs.org.
-        run: npm publish --access public --provenance --registry=https://registry.npmjs.org/
+        #
+        # --provenance is not passed: with trusted publishing npm generates the
+        # attestation automatically (public repo + public package). Passing it
+        # by hand is only needed for the token path.
+        run: npm publish --access public --registry=https://registry.npmjs.org/
         env:
           # Empty when trusted publishing is configured — npm then uses OIDC.
+          # Only the *first* publish needs this, and only until step (d) of
+          # the header comment has been done.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
