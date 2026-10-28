@@ -118,13 +118,32 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ruff mypy pytest pytest-cov
           npm install --no-package-lock --no-audit --no-fund
-      - name: Use a current npm (11.5.1+ for trusted publishing, 11.15.0+ for staging)
-        run: npm install -g npm@latest
+          # Print what the gate will actually call, so a failure names the
+          # missing tool instead of surfacing as a downstream ENOENT.
+          echo "node: $(node --version)"
+          echo "npm:  $(npm --version) at $(command -v npm)"
+      # The gate below runs on the npm that setup-node installed, BEFORE the
+      # upgrade. `npm install -g npm@latest` replaces the whole global npm
+      # installation ("removed 8 packages, and changed 77 packages"), and the
+      # replacement briefly leaves the `npm` on PATH pointing at a removed
+      # tree. Anything that shells out to `npm` after that point fails with a
+      # bare ENOENT — which is exactly what the dsh runtime test did, and it
+      # read as "a dependency is missing" rather than "npm moved".
+      #
+      # So: run the gate first (stable npm), upgrade afterwards, and prove the
+      # upgrade left a working npm behind.
       - name: Check what is already published
         run: |
           npm view @ttxs69/hermes-continue-hook versions --json || echo "not published yet"
       - name: Pack and show the contents
         run: npm pack --dry-run
+      - name: Use a current npm (11.5.1+ for trusted publishing, 11.15.0+ for staging)
+        run: |
+          npm install -g npm@latest
+          # The upgrade replaces the global npm tree; make sure the `npm` that
+          # is still on PATH is the new one and actually runs.
+          npm --version
+          command -v npm
       - name: Dry run
         if: ${{ inputs.dry-run }}
         run: npm publish --dry-run --access public --registry=https://registry.npmjs.org/
