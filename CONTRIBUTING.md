@@ -10,14 +10,37 @@ with a job that installs and uninstalls using nothing but `node`.
 npm install     # dev tooling only; the shipped package has no runtime deps
 ```
 
+## The hooks (installed for you by `npm install`)
+
+Two git hooks, installed by husky when you run `npm install`:
+
+| hook | what it runs | how long |
+|---|---|---|
+| `pre-commit` | ruff + ruff format + prettier **on the staged files only**, plus mypy | ~2 s |
+| `pre-push` | `./scripts/check.sh` — the whole gate | ~60 s |
+
+The split is measured, not guessed: the full gate takes about a minute
+(the Python and JavaScript suites), which is fine before a push and not fine
+before every commit.
+
+`pre-commit` also refuses to run on the wrong node — it reads `.nvmrc` and
+fails if the major version does not match. That check exists because a
+commit made with a different node produces a different result than the same
+commit in CI, and the difference is invisible until CI runs it.
+
+Bypass either one with `git commit --no-verify` / `git push --no-verify`.
+
 ## Before you push
 
 ```bash
 ./scripts/check.sh      # ruff, mypy, pytest, eslint, prettier, tsc ×2, vitest, npm pack
 ```
 
-It is the same set of checks CI runs, minus the DeepSeek Harness typecheck
-(which needs the npm registry):
+The `pre-push` hook runs exactly this, so you normally do not need to.
+
+It is the same set of checks CI runs, minus the DeepSeek Harness suite
+(which needs the npm registry — CI runs it in its own job, and the gate is
+deliberately offline):
 
 ```bash
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*

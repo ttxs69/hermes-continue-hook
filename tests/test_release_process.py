@@ -7,6 +7,7 @@ because a guard that silently stops guarding is worse than no guard at all.
 from __future__ import annotations
 
 import json
+import os
 import re
 import unittest
 from pathlib import Path
@@ -164,6 +165,68 @@ class TestThePublishWorkflow(unittest.TestCase):
         """
         self.assertNotIn("npm install -g npm@latest", self.text)
         self.assertIn("npm --version", self.text)
+
+
+class TestGitHooks(unittest.TestCase):
+    """The hooks are the local copy of the CI gate.
+
+    A commit that passes locally but fails in CI is the failure mode these
+    hooks exist to catch, so they have to actually run — and the published
+    package must not carry them.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(__file__).resolve().parent.parent
+
+    def test_the_hooks_exist_and_are_executable(self) -> None:
+        for name in ("pre-commit", "pre-push"):
+            hook = self.root / ".husky" / name
+            self.assertTrue(hook.exists(), f".husky/{name} is missing")
+            self.assertTrue(os.access(hook, os.X_OK), f".husky/{name} is not executable")
+
+    def test_the_pre_commit_hook_runs_only_the_fast_checks(self) -> None:
+        """The full gate takes a minute; a commit hook cannot run that."""
+        text = _read(self.root / ".husky" / "pre-commit")
+        self.assertIn("ruff", text)
+        self.assertNotIn("check.sh", text)
+        self.assertNotIn("vitest", text)
+
+    def test_the_pre_push_hook_runs_the_whole_gate(self) -> None:
+        text = _read(self.root / ".husky" / "pre-push")
+        self.assertIn("check.sh", text)
+
+    def test_the_hooks_refuse_the_wrong_node(self) -> None:
+        """A gate on a different node than CI's does not predict CI."""
+        text = _read(self.root / ".husky" / "pre-commit")
+        self.assertIn(".nvmrc", text)
+
+    def test_the_published_package_carries_no_hooks(self) -> None:
+        """A published package must not ship git hooks."""
+        package = json.loads(_read(self.root / "package.json"))
+        files = package.get("files", [])
+        self.assertFalse(
+            any(entry.startswith(".husky") for entry in files),
+            f"the package would ship the git hooks: {files}",
+        )
+
+    def test_husky_is_installed_by_the_prepare_script(self) -> None:
+        """Otherwise the hooks exist only for whoever set them up by hand."""
+        package = json.loads(_read(self.root / "package.json"))
+        prepare = package["scripts"].get("prepare", "")
+        self.assertIn("install-git-hooks", prepare)
+        self.assertIn("husky", package.get("devDependencies", {}))
+
+    def test_the_prepare_script_survives_a_pack_without_dev_dependencies(self) -> None:
+        """npm runs `prepare` for `npm pack` too.
+
+        CI has a job that packs the package without installing the dev
+        dependencies, and there husky is not there at all. The script has to
+        notice that and carry on — "sh: 1: husky: not found" is not a reason
+        to refuse to build a package.
+        """
+        script = _read(self.root / "scripts" / "install-git-hooks.sh")
+        self.assertIn("node_modules/.bin/husky", script)
+        self.assertIn("exit 0", script)
 
 
 class TestNoSecretIsNeeded(unittest.TestCase):
