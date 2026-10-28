@@ -39,13 +39,35 @@ console.log("installing dsh packages + typescript …");
 // walking up to a parent directory that has one and installing *there*.
 writeFileSync(
   path.join(WORK, "package.json"),
-  JSON.stringify({ name: "ch-dsh-test", type: "module", private: true }, null, 2),
+  JSON.stringify(
+    {
+      name: "ch-dsh-test",
+      type: "module",
+      private: true,
+      // The dependencies live in the manifest rather than on the npm command
+      // line. `npm i --no-save <pkgs>` behaves differently from npm version to
+      // npm version — the release workflow installs the newest npm before
+      // publishing, and that combination installed nothing and left
+      // node_modules/.bin/tsc missing. A manifest plus a plain `npm install`
+      // is the boring path every npm version agrees on.
+      dependencies: {
+        "@deepseek-ai/dsh-agent": "*",
+        "@deepseek-ai/dsh-llm": "*",
+        "@deepseek-ai/dsh-session": "*",
+        "@deepseek-ai/cordis": "*",
+        typescript: "*",
+        "@types/node": "*",
+      },
+    },
+    null,
+    2,
+  ),
 );
 execFileSync(
   "npm",
   [
-    "i",
-    "--no-save",
+    "install",
+    "--no-package-lock",
     "--no-audit",
     "--no-fund",
     // The official registry, explicitly. A user (or CI) whose ~/.npmrc points
@@ -53,14 +75,11 @@ execFileSync(
     // carry them — and the test fails for a reason that has nothing to do with
     // this plugin.
     "--registry=https://registry.npmjs.org/",
-    "@deepseek-ai/dsh-agent",
-    "@deepseek-ai/dsh-llm",
-    "@deepseek-ai/dsh-session",
-    "@deepseek-ai/cordis",
-    "typescript",
-    "@types/node",
   ],
-  { cwd: WORK, stdio: "ignore" },
+  // Not "ignore": with the output swallowed, a failed install looked like a
+  // missing dependency ("node_modules/.bin/tsc ENOENT") instead of what it
+  // was — the install itself failing. The npm error is the useful part.
+  { cwd: WORK, stdio: "inherit" },
 );
 
 const SRC = path.join(WORK, "src");
