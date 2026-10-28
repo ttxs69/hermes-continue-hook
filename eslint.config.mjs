@@ -25,6 +25,7 @@ export default tseslint.config(
       "patch-mode/**",
       "adapters/dsh/lib/**",
       "coverage/**",
+      ".venv/**",
       "**/*.d.ts",
     ],
   },

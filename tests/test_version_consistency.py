@@ -68,7 +68,12 @@ class TestVersionConsistency(unittest.TestCase):
         offenders = []
         checked = 0
         for path in sorted(REPO.rglob("*.json")):
-            if "node_modules" in path.parts or "__pycache__" in path.parts:
+            if (
+                "node_modules" in path.parts
+                or "__pycache__" in path.parts
+                or ".venv" in path.parts
+                or "venv" in path.parts
+            ):
                 continue
             if path.name in {"package-lock.json", "pack.json"}:
                 continue
@@ -101,7 +106,12 @@ class TestProjectHygiene(unittest.TestCase):
         for path in REPO.rglob("*"):
             if not path.is_file() or path.suffix in {".png", ".jpg", ".pyc"}:
                 continue
-            if "__pycache__" in path.parts or "node_modules" in path.parts:
+            if (
+                "__pycache__" in path.parts
+                or "node_modules" in path.parts
+                or ".venv" in path.parts
+                or "venv" in path.parts
+            ):
                 continue
             try:
                 text = _read(path)

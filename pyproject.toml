@@ -89,13 +89,25 @@ addopts = "-q"
 
 [tool.coverage.run]
 source = ["."]
-omit = ["tests/*", "node_modules/*", ".venv/*"]
+# `patch-mode/continue_hook.py` is GENERATED from detector.py + hookctl.py by
+# scripts/build-patch-mode.py. Counting it made the headline number describe a
+# file nobody edits by hand — the same code, counted twice, with the copy that
+# only exists on disk inside the Hermes core tree. `scripts/` is a maintainer
+# toolchain (release, packaging, code generation), not shipped runtime code.
+omit = [
+    "tests/*",
+    "node_modules/*",
+    ".venv/*",
+    "patch-mode/*",
+    "scripts/*",
+]
 
 [tool.coverage.report]
-# Measured: detector 84%, hookctl 94%, __init__ 76%, _common 69%, patch-mode
-# 71% — 79% overall. The floor sits a point under that so it catches a
-# regression without failing on a defensive branch someone adds tomorrow.
-fail_under = 78
+# Measured on the code that is actually written by hand:
+# detector 84%, hookctl 94%, __init__ 76%, adapters/_common 69% — 82% overall.
+# The floor sits a point under that so it catches a regression without failing
+# on a defensive branch someone adds tomorrow.
+fail_under = 80
 skip_covered = true
 
 [dependency-groups]
