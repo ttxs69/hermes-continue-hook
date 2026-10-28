@@ -49,7 +49,12 @@ echo "== tsc (JavaScript, checkJs)"
 npx --no-install tsc -p tsconfig.checkjs.json
 
 echo "== vitest (with the coverage floor)"
-npx --no-install vitest run --coverage
+# The dsh suite is excluded here on purpose: it installs the real
+# @deepseek-ai/dsh-* packages from the npm registry to compile against, so it
+# needs the network. This gate has to work offline and reproducibly. CI runs
+# that suite in its own job ("dsh plugin (typecheck + runtime)"), where the
+# install is the point of the job.
+npx --no-install vitest run --coverage --exclude "tests/test_dsh.test.mjs"
 
 echo "== npm pack (contents)"
 npm pack --dry-run > /dev/null
