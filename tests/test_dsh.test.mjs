@@ -31,6 +31,16 @@ cpSync(path.join(REPO, "detector.py"), path.join(HOME, ".hermes", "continue-hook
 process.env.HOME = HOME;
 
 console.log("installing dsh packages + typescript …");
+// The package.json has to exist BEFORE the install. `npm i --no-save` in a
+// directory that has no package.json fails on npm 12 ("npm error code 1",
+// nothing installed) — and the test then dies on a missing
+// node_modules/.bin/tsc, which reads like a missing dependency rather than a
+// wrong order of operations. Writing package.json first also stops npm from
+// walking up to a parent directory that has one and installing *there*.
+writeFileSync(
+  path.join(WORK, "package.json"),
+  JSON.stringify({ name: "ch-dsh-test", type: "module", private: true }, null, 2),
+);
 execFileSync(
   "npm",
   [
@@ -60,10 +70,6 @@ cpSync(PLUGIN_SRC, path.join(SRC, "index.ts"));
 // fixture the test passes while the plugin would do nothing in production.
 cpSync(path.join(REPO, "hookctl.py"), path.join(WORK, "hookctl.py"));
 cpSync(path.join(REPO, "detector.py"), path.join(WORK, "detector.py"));
-writeFileSync(
-  path.join(WORK, "package.json"),
-  JSON.stringify({ name: "ch-dsh-test", type: "module", private: true }, null, 2),
-);
 writeFileSync(
   path.join(WORK, "tsconfig.json"),
   JSON.stringify(
