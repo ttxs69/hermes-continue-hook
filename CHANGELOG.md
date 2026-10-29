@@ -1,5 +1,82 @@
 # Changelog
 
+## 1.5.0 (2026-10-29)
+
+**The `boundary` word list is deleted.** The user never asked for it
+(「我从来没说过要加 boundary 词表」), and it was doing measurable harm.
+
+### What it was
+
+`exclusions.boundary` was a hand-written list of money / identity / publish /
+delete words. `detect()` tested it against the whole 240-character tail, so
+**any** reply whose tail happened to contain `¥1`, `publish`, `授权` or `上线`
+was released without a nudge.
+
+### Why it was wrong (measured, not argued)
+
+Over **1430 real turn-final replies**:
+
+| | before | after |
+|---|---|---|
+| released by `boundary` | **510 (36%)** | **0** |
+| actually nudged | 33 | **43** (+10 recovered) |
+| `user_must` releases | 9 | 24 (boundary no longer steals them) |
+
+**407 of those 510 had no boundary word in the closing sentence at all** —
+the word only appeared in the body. The semantic was "this closing sentence is
+asking the user to authorise an irreversible action"; the implementation was
+"a boundary word appears somewhere in the tail". Two different things.
+
+The hook was, in practice, mostly switched off.
+
+### The guard moved into the nudge text
+
+Both templates already carried the boundary check as prose. The prose was
+**conditional** ("needs something only the user has"), which the third review
+round rejected: an agent holding DB credentials satisfies
+"only the user has" as *false*, so it would go ahead and delete the table.
+
+Both templates now carry an **unconditional list**, keyed on the action itself
+rather than on who holds the credential:
+
+> 1. BEFORE running anything, check the step you promised against this list:
+>    - spending money / buying / transferring funds / paying anyone;
+>    - real-name or identity verification, signing a contract;
+>    - publishing, posting or shipping anything outward (npm, PyPI, GitHub
+>      release, a message to a customer, a live post);
+>    - deleting, overwriting or clearing data; deploying to a live/production
+>      system; merging to main; rotating credentials or keys.
+>    If the promised step is any of these, ask the user for that ONE thing in a
+>    single line and stop — **even if you hold the credentials and even if you
+>    were given permission earlier in this conversation. This check is about
+>    the action itself, not about who owns the credential.**
+
+So the detector now judges **shape** (is there a question / a promise / a
+hand-off?) and the agent judges **meaning** (is this action irreversible?).
+The agent has the context; a word list can only guess.
+
+### Also fixed in this release
+
+- `tests/test_detector.py`: the four "known missed" shapes that 1.4.1 pinned
+  as released are now caught — `下一步我去检查生产库的索引大小。` and friends
+  were released only because a global word list matched a word used as a
+  **noun**（「生产库」「deploy」「付款」）. They now fire as `trigger:promise`.
+- Two phrases without a first person (`I'll delete the stale snapshots now.`,
+  `下一步我立刻付款。`) never matched the promise trigger to begin with; that
+  is unchanged and recorded rather than papered over.
+
+### Do not add the word list back
+
+Adding a word only postpones the miss and costs a different one. Measured
+today, four times in a row: `付费`, `清空`, `生产配置`, `推送目标` — each catch
+bought one hit and cost one miss. Four further word-table designs were built
+and rejected against real data (direction words, tense words, inquiry frames,
+preceding-frame words); all failed for the same reason — **they were using a
+regex to judge meaning**.
+
+`tests/test_detector.py::TestBoundaryDirection::test_the_word_table_is_gone`
+asserts the list stays gone.
+
 ## 1.4.1 (2026-10-29)
 
 Documentation and dead-code cleanup after 1.4.0 shipped. No behaviour change

@@ -129,8 +129,14 @@ class TestDetectorCli(unittest.TestCase):
     def test_declarative_ending_is_not_detected(self):
         self.assertFalse(self._run("已完成，验证通过。")["should_nudge"])
 
-    def test_boundary_is_excluded(self):
-        self.assertEqual(self._run("这会花 $69，需要你批准后我才买。")["reason"], "boundary")
+    def test_a_user_approval_request_is_excluded(self):
+        """「需要你批准」是第二人称请求 ⇒ user_must 放行。
+
+        2026-10-29：boundary 词表删除（用户明令）。原来这条命中的是
+        boundary（因为 tail 里有「$69」）；现在由 user_must 负责 ——
+        它是**第二人称请求**，与「这个动作不可逆」是两件事，判据更准。
+        """
+        self.assertEqual(self._run("这会花 $69，需要你批准后我才买。")["reason"], "user_must")
 
 
 if __name__ == "__main__":

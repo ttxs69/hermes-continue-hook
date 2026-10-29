@@ -101,10 +101,15 @@ class TestDetectorCli(unittest.TestCase):
         out = self._run("已完成，验证通过。")
         self.assertFalse(out["should_nudge"])
 
-    def test_boundary_is_excluded(self):
+    def test_a_user_approval_request_is_excluded(self):
+        """「需要你批准」是第二人称请求 ⇒ user_must 放行。
+
+        2026-10-29：boundary 词表删除（用户明令）。护栏改由 nudge 文本承担，
+        而这条收尾本来就该由 user_must（第二人称请求）挡住。
+        """
         out = self._run("这会花 $69，需要你批准后我才买。")
         self.assertFalse(out["should_nudge"])
-        self.assertEqual(out["reason"], "boundary")
+        self.assertEqual(out["reason"], "user_must")
 
     def test_max_nudges_returns_max_nudges(self):
         out = self._run("要不要我继续？", attempt=5)
