@@ -1,6 +1,45 @@
 # Changelog
 
+## 1.4.1 (2026-10-29)
+
+Documentation and dead-code cleanup after 1.4.0 shipped. No behaviour change
+except two boundary words.
+
+- The 1.4.0 notes described a `exclusions.hard_boundary` key and a "union"
+  mechanism. **That key was deleted before release** — the notes and six code
+  comments were describing something that is not there. Both fixed. The rule
+  now is written down once: `boundary` + `user_must`, nothing else.
+- The traffic figure in the 1.4.0 notes was measured over 2300 messages, which
+  included compressed history — the same turn counted repeatedly. Re-measured
+  over active turn-final replies only: **1445 messages, 1.3.5 = 31 (2.15%),
+  1.4.0 = 32 (2.21%), +1, 0 lost.** That one extra is a **false positive**:
+  「**待你拍板**：赞赏和付费永久卡在「原创 0/3」…还是放弃这两条？」— 1.3.5 let
+  it through because of 「付费」, 1.4.0 reads it as `question_mark` and nudges.
+  Cost: the agent asks once more. Accepted because the same word removal is what
+  makes the feature's originating sentence fire at all.
+- 「付款」 appeared twice in `boundary`; deduplicated.
+- Tried adding `生产配置|线上配置` to `boundary`, then removed it: it also
+  released 「下一步我去读一下**生产配置**的文档」, a real promise. Fourth time
+  today that adding a word bought one catch and cost one miss — recorded instead
+  of patched.
+
+Still open, and deliberately not fixed here: eight irreversible phrasings are
+nudged where 1.3.5 neither blocked nor nudged them（`push 到 main`、
+`改生产配置`、`push the branch`、`go live` 类）. Adding `\bpush\b` or
+`live` to `boundary` would fire on 「push 通知」「live 环境」— the same
+word-list trap that cost three review rounds on `付费` and `清空`. Recorded,
+not patched.
+
+339 tests pass.
+
 ## 1.4.0 (2026-10-29)
+
+> **⚠ 本段有误，见 1.4.1。** 这里描述了一个 `exclusions.hard_boundary` 键和
+> 「取并集」机制 —— **那个键在发布前就删掉了**，不存在。真实流量数字也不对：
+> 本段写的 2291 / 110 / 114 是在**包含压缩历史**的消息上算的，同一回合被重复
+> 计入；按活跃 turn-final 重算是 **1445 / 31 / 32 / +1**。「338 tests」实为 339。
+> 原文保留不动，以 1.4.1 为准。
+
 
 A fifth trigger class: **announced-but-undone**.
 

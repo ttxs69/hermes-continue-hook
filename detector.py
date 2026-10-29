@@ -181,13 +181,13 @@ DEFAULTS: dict = {
     # Exclusions: any hit short-circuits to skip — legitimate asks and real
     # blockers. Better to miss a nudge than to interrupt a real question.
     "exclusions": {
-        # ⚠ `hard_boundary` = **不可逆 / 对外** 的动作。promise 触发**不能**抢在它前面。
+        # 判据：命中即放行，不 nudge。宁可少 nudge 一次，也别打断用户真正的提问。
         #
-        # 2026-10-29 红队阻断：上一版让 promise 先于 boundary 判定，于是
-        # 「下一步我去付款开通」「下一步我去把生产库的旧表删掉」从 1.3.5 的
-        # **代码级放行** 变成被 nudge —— nudge 文案豁免写的是「需要用户独有的东西」
-        # （持有物判据），而 agent 手里有 DB 凭据、有 npm token 时这条为假，
-        # 它完全可以顺势删库/发版。**用散文替代硬门 = 护栏回退。**
+        # ⚠ 2026-10-29：这里曾有一个 `hard_boundary` 键（41 行「不可逆动作」正则）。
+        # 三轮红队围绕它改过三次：先让它抢在 boundary 前 → 再做全局早退（吞掉 12
+        # 条 nudge）→ 再取并集。实测 `boundary` 单独覆盖 25 条不可逆承诺中的 19 条，
+        # 那套代码只多给 3 条 ⇒ 整套删除。**不要再加回来**，也不要为「猜这句话是不是
+        # 在说付款/发布/删除」再写正则：那是权限层的事，stop hook 只有文本。
         #
         # 教训：promise 只该抢在**软名词**前面（「付费证据」「成本」「报价」这类
         # 只是话题词，不是动作）。真正不可逆的动作必须仍然在代码里短路。
@@ -199,7 +199,7 @@ DEFAULTS: dict = {
             # 2026-10-29：就是这个词让「下一步我去查…那是该品类的**付费**证据」
             # 被整句放行 —— 而那句正是这个 feature 的起因。
             "花钱|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
-            "买(?!账)|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱|付款|报价",
+            "买(?!账)|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱|报价",
             # 「清空」带数据宾语才算破坏性动作：「旧逻辑已清空」不会命中，
             # 「把旧数据清空」会。用宾语而不是裸词，避免重复「付费」的错误。
             "对外发布|发布出去|删掉|清空.{0,4}(数据|表|库|记录|日志)|(数据|表|库|记录|日志).{0,4}(清空|删掉)|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她|公众号|子|列表|名单)|"
@@ -363,20 +363,13 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     tr = cfg.get("triggers", {})
     trig_tail = _QUOTE_RE.sub("", tail)  # quoted mentions are not asks
     # ---------------------------------------------------------------------
-    # `promise` 的判定顺序（2026-10-29 两轮红队各纠正一次，见下）
+    # `promise` 的判定顺序（2026-10-29 三轮红队各纠正一次，见下）
     #
     # 为什么 promise 要**先于** `boundary` 排除：
     #   真实收尾句「下一步我去查…有没有定价页和真实客户证言——那是该品类的
     #   **付费**证据…」被 boundary 的「付费」命中而整句放行。那是名词
-    #   （"付费证据"），不是「我要去付款」—— 词表分不出来，加词表只会再漏。
-    #
-    # 但 `hard_boundary` **只能挡 promise 自己**，不能做全局早退：
-    #   上一版把它放在 detect() 最顶端，于是它短路了 offer / hand_off /
-    #   question_mark 全部触发。1422 条真实回复回放：1.3.5 nudge 28 (1.97%)，
-    #   那一版 nudge 16 (1.13%) —— **被吞掉 12 条**，其中 6 条 question_mark、
-    #   4 条 hand_off、3 条 offer。被吞的原句比如
-    #   「要我现在就把这个加固做了吗？顺便说，上次发布很顺利。」（尾窗含「发布」）
-    #   ⇒ 护栏从「拦太多」变成「几乎什么都不拦」。
+    #   （"付费证据"），不是「我要去付款」。修法**不是**改控制流，而是把 boundary
+    #   里那个有歧义的名词删掉（见 boundary 的注释）—— 控制流一动就出过两次事故。
     # ---------------------------------------------------------------------
     # ⚠ 必须用**剥掉代码块与引用**的 tail：`tail` 是原文，代码块里的
     # `# TODO: refactor` 会被当成承诺（2026-10-29 误伤实测，中英文各一条）。
@@ -388,20 +381,16 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
         r"next step is blocked (on|by)|下一步(卡|阻塞)在",
         _promise_window,
     )
-    # ⚠ `hard_boundary` 只否掉 **promise 这一条路**，随后继续走下面的
-    # boundary / user_must / offer / hand_off / question_mark。
+    # 承诺本身就触及 boundary / 需要用户独有的东西 ⇒ 放行。
+    #
+    # 判据只有 `boundary` + `user_must`（1.3.5 就有的两张表），**不另写一套**。
+    # 曾经有过一套 `hard_boundary`，是 boundary 的真子集；用它单独挡 promise 时
+    # `push to npm` / `merge into main` / `rotate the production keys` 全漏，
+    # 22 条不可逆承诺 22 条被 nudge。用更小的网取代更大的网 = 护栏回退。
     _promise_hit = (not _needs_user) and bool(_compile(tr.get("promise")).search(_promise_window))
     if _promise_hit and (
         _compile(ex.get("boundary")).search(tail) or _compile(ex.get("user_must")).search(tail)
     ):
-        # 承诺本身就是不可逆 / 对外 / 需要用户独有的东西 ⇒ 放行。
-        #
-        # ⚠ 2026-10-29 第三轮红队：`hard_boundary` 是 `boundary` 的**真子集**。
-        # 曾经只用 hard_boundary 挡 promise，于是 boundary 原本拦得住的
-        # `push` / `npm publish` / `merge into main` / `发到 npm` /
-        # `rotate the production keys` 全漏 —— 22 条不可逆承诺 22 条被 nudge，
-        # 其中 14 条是 1.3.5 曾经放行的。用更小的网取代更大的网 = 护栏回退。
-        # ⇒ boundary 与 hard_boundary 取**并集**，hard_boundary 只做补充。
         return False, "boundary"
     if _promise_hit:
         if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
