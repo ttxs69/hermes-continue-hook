@@ -198,47 +198,6 @@ DEFAULTS: dict = {
         #
         # 教训：promise 只该抢在**软名词**前面（「付费证据」「成本」「报价」这类
         # 只是话题词，不是动作）。真正不可逆的动作必须仍然在代码里短路。
-        "hard_boundary": [
-            # ⚠ 判据是「**动作**不可逆」，不是「**提到**不可逆名词」。
-            #
-            # 2026-10-29 自测：第一版用名词表，10 条反向攻击里 7 条被**误放行** ——
-            #   「下一步我去看一下**发布**日志」（看日志，不是发布）
-            #   「下一步我去把**删除**逻辑改成软删」（改代码，不是删数据）
-            #   「下一步我去读一下**支付**模块的实现」
-            #   「下一步我去检查**生产库**的索引大小」
-            #   「下一步我去把 **deploy** 脚本的 typo 修了」
-            #   「下一步我去把**付款**按钮的颜色改成蓝色」
-            # 这些全是真承诺，却被当边界放行了 —— 等于把该拦的漏掉。
-            #
-            # 中文词性难判，所以用**位置**：边界词必须紧跟情态/趋向动词
-            # （去/要/会/将/就/马上/立刻/现在/这就/直接），否则它是定语不是动作。
-            r"(去|要|会|将|就|马上|立刻|现在|这就|直接)\s*"
-            r"(付款|支付|充值|下单|购买|转账|打钱|汇款|签约|签合同|删掉|清空|覆盖|"
-            r"发布|上线|部署|实名|认证)",
-            # 情态词 + 英文动词（「下一步我去 deploy 到生产环境」）
-            r"(去|要|会|将|就|马上|立刻|现在|这就|直接)\s*"
-            r"(deploy|publish|release|push|pay|purchase|delete|drop|truncate)\b",
-            # 「去做实名认证」这类中间夹一个泛动词的写法
-            r"(去|要|会|将)\s*(做|搞|弄|走)\s*(实名|认证|备案|付款|充值|发布|上线|部署)",
-            # 密钥轮换 / 改生产配置 本身就是不可逆（正反序都要：
-            # 「轮换生产环境的密钥」与「把密钥轮换一下」是同一件事）
-            r"(轮换|重签|吊销|revoke|rotate)\s*.{0,6}(密钥|证书|token|key)",
-            r"把.{0,10}(密钥|证书|token|生产配置|线上配置|主表|生产库).{0,8}"
-            r"(轮换|重签|吊销|删|改|清|换|drop)",
-            r"(改|写|删|清|换|重启|扩容|缩容).{0,6}(生产环境|线上环境|生产配置|线上配置|生产库|线上库)",
-            # 目标 + 完成体动作（「把 X 删掉」这类明确结构）。
-            # ⚠ 不収裸「删除」——「把**删除**逻辑改成软删」里的「删除」是名词。
-            r"把.{0,20}(删掉|删了|清空|清掉了|覆盖掉)",
-            r"(drop\s+table|truncate\s+table|rm\s+-rf)",
-            r"(生产库|生产环境|线上环境|主表|旧表).{0,12}(改|写|删|清|换)",
-            # 英文：必须是第一人称将来时 + 不可逆动词，不是 "the deploy logs"。
-            # ⚠ `pay attention` 不是付款 —— 2026-10-29 实测：原有回归测试
-            # 「Should I pay attention to the lint warnings?」被 `\bpay\b` 放行。
-            r"\b(?:i(?:'|’)ll|i will)\s+(?:now\s+|go\s+)?"
-            r"(?:pay(?!\s+(?:close\s+)?att(?:ention|n))|purchase|checkout|subscribe|"
-            r"delete|drop|truncate|overwrite|wipe|publish|deploy|release|force[- ]push)\b",
-            r"\bforce[- ]push\b",
-        ],
         # User-only boundaries: money, identity, credentials, publishing,
         # destructive actions.
         "boundary": [
@@ -248,7 +207,9 @@ DEFAULTS: dict = {
             # 被整句放行 —— 而那句正是这个 feature 的起因。
             "花钱|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
             "买(?!账)|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱|付款|报价",
-            "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她|公众号|子|列表|名单)|"
+            # 「清空」带数据宾语才算破坏性动作：「旧逻辑已清空」不会命中，
+            # 「把旧数据清空」会。用宾语而不是裸词，避免重复「付费」的错误。
+            "对外发布|发布出去|删掉|清空.{0,4}(数据|表|库|记录|日志)|(数据|表|库|记录|日志).{0,4}(清空|删掉)|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她|公众号|子|列表|名单)|"
             "发布(到|至|上)|推(送)?到|上线|导出.{0,4}(数据|客户|用户)|"
             "npm|pypi|npmjs|github release|生产(环境|库|服务器)",
             "生产环境|线上环境|主分支|改数据库|重启服务",
@@ -431,9 +392,7 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     # boundary / user_must / offer / hand_off / question_mark。
     _promise_hit = (not _needs_user) and bool(_compile(tr.get("promise")).search(_promise_window))
     if _promise_hit and (
-        _compile(ex.get("boundary")).search(tail)
-        or _compile(ex.get("hard_boundary")).search(tail)
-        or _compile(ex.get("user_must")).search(tail)
+        _compile(ex.get("boundary")).search(tail) or _compile(ex.get("user_must")).search(tail)
     ):
         # 承诺本身就是不可逆 / 对外 / 需要用户独有的东西 ⇒ 放行。
         #

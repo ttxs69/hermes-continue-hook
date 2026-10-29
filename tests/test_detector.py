@@ -77,6 +77,7 @@ class TestPromise(unittest.TestCase):
         for s in (
             "下一步我要付款开通，需要你批准。",
             "下一步我去把生产库的旧表删掉。",
+            "下一步我去把旧数据清空。",
             "下一步我会发布到 npm。",
             "下一步我去部署到生产环境。",
             "Next step: I'll deploy to production and rotate the keys.",
@@ -298,17 +299,16 @@ class TestBoundaryDoesNotSwallowOtherTriggers(unittest.TestCase):
             self.assertEqual(reason, expected, sentence)
 
 
-class TestHardBoundaryDirection(unittest.TestCase):
+class TestBoundaryDirection(unittest.TestCase):
     """hard_boundary 必须两个方向都对，任一边偏就是事故。
 
-    2026-10-29 两次实测：
-      · 第一版让 promise 抢在 boundary 前 ⇒ 「下一步我去付款开通」被 nudge
-        （护栏回退，红队 S1 阻断）。
-      · 第二版用名词表做 hard_boundary ⇒ 10 条反向攻击里 7 条被**误放行**：
-        「下一步我去看一下发布日志」「下一步我去读一下支付模块的实现」
-        「下一步我去把 deploy 脚本的 typo 修了」「下一步我去把付款按钮的颜色改成蓝色」
-        全是真承诺，却被当边界漏掉。
-    ⇒ 两个方向都钉在这里。
+    2026-10-29 走过的弯路（三轮红队各纠正一次）：
+      · 让 promise 抢在 boundary 前 ⇒ 「下一步我去付款开通」被 nudge（护栏回退）。
+      · 自造一套 `hard_boundary` 名词表 ⇒ 10 条「边界词作定语」的真承诺被误放行。
+      · 只拿 `hard_boundary` 挡 promise ⇒ 它是 boundary 的真子集，22 条不可逆
+        承诺全被 nudge，14 条是 1.3.5 拦过的。
+    实测 boundary 单独覆盖 19/23，那套 41 行只额外给 2 条 ⇒ 整套删除。
+    ⇒ 现在的判据只有 boundary（1.3.5 那张表）+ 删掉其中「付费」一个名词。
     """
 
     CFG: ClassVar[dict] = default_config()
@@ -317,7 +317,6 @@ class TestHardBoundaryDirection(unittest.TestCase):
         "下一步我去付款开通。",
         "下一步我要充值 200 元。",
         "下一步我去把生产库的旧表删掉。",
-        "下一步我去把旧数据清空。",
         "下一步我去发布到 npm。",
         "下一步我去部署到生产环境。",
         "下一步我去 force-push 到 main。",
