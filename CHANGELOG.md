@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.3 (2026-10-29)
+
+- **`engines` no longer requires a specific npm version.**
+  The manifest said `"npm": ">=11.15.0"`. That number is the **release
+  toolchain's** requirement — `npm stage publish` needs 11.15.0+ and
+  trusted publishing needs 11.5.1+ — but putting it in `engines` turned it
+  into a requirement on **every person who installs the package**. Anyone on
+  a default npm saw this before the CLI even started:
+
+  ```
+  npm warn EBADENGINE Unsupported engine {
+  npm warn EBADENGINE   package: '@ttxs69/hermes-continue-hook@1.3.2',
+  npm warn EBADENGINE   required: { npm: '>=11.15.0' },
+  npm warn EBADENGINE   current: { node: 'v22.23.2', npm: '10.9.8' }
+  npm warn EBADENGINE }
+  ```
+
+  The package worked fine (rc=0), but a first-time user meets a warning
+  before they meet the tool. `engines` now states only `{"node": ">=18"}`,
+  which is the real runtime floor.
+
+  The release-side requirements are still recorded in `.github/workflows/publish.yml`,
+  and a test now pins **both** sides: `engines` must not mention npm, and
+  the publish workflow's notes must still say which npm it needs. The old
+  test asserted the wrong thing — it required `engines` to carry the npm
+  floor, which is what caused the warning in the first place.
+
 ## 1.3.2 (2026-10-28)
 
 - **The patch no longer carries its own copy of the detector.**

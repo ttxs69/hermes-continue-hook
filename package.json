@@ -35,8 +35,7 @@
     "patch-mode/"
   ],
   "engines": {
-    "node": ">=18",
-    "npm": ">=11.15.0"
+    "node": ">=18"
   },
   "scripts": {
     "prepare": "bash scripts/install-git-hooks.sh",
