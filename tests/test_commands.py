@@ -113,10 +113,17 @@ class TestTestCommand(_HomeCase):
         out = PLUGIN._cmd_test("已完成 README 优化。验证：lint 通过。")
         self.assertIn("detect=False", out)
 
-    def test_a_boundary_ask_is_excluded(self) -> None:
+    def test_a_user_approval_request_is_excluded(self) -> None:
+        """「需要你批准并提供 key」⇒ user_must 放行。
+
+        2026-10-29：boundary 词表删除（用户明令：「我从来没说过要加 boundary 词表」）。
+        那张表实测把 1430 条真实收尾里的 510 条（36%）误放行。
+        护栏改由 nudge 文本的无条件清单承担；这条收尾本身是第二人称请求，
+        由 user_must 判。
+        """
         out = PLUGIN._cmd_test("这一步要调用付费 API，需要你批准并提供 key。要我继续吗？")
         self.assertIn("detect=False", out)
-        self.assertIn("boundary", out)
+        self.assertIn("user_must", out)
 
     def test_empty_text(self) -> None:
         self.assertIn("detect=False", PLUGIN._cmd_test(""))

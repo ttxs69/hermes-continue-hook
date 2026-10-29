@@ -74,6 +74,17 @@ class TestPromise(unittest.TestCase):
         （持有物判据），而 agent 手里有 DB 凭据、有 npm token 时这条为假 ——
         它完全可以顺势删库/发版。**用散文替代硬门 = 护栏回退。**
         """
+        # ⚠ 2026-10-29：boundary 词表已整块删除（用户明令：「我从来没说过要加
+        # boundary 词表」）。它实测把 1430 条真实收尾里的 **510 条（36%）**
+        # 误放行 —— 语义是「这一条收尾在请求不可逆动作」，实现却是
+        # 「tail 里出现过边界词」。
+        #
+        # ⇒ 护栏改由 **promise nudge 模板的无条件清单**承担（见下一个测试）：
+        #   清单里的动作**无条件**要求先问用户，**即使 agent 手里有凭据**。
+        #   红队当初的反对是「用散文替代硬门 = 护栏回退」，而它针对的是
+        #   旧散文里的**条件从句**（"needs something only the user has" ——
+        #   agent 有 DB 凭据时该从句为假，于是它真去删库）。
+        #   新措辞把判据从「谁持有凭据」换成「**这个动作本身**是什么」。
         for s in (
             "下一步我要付款开通，需要你批准。",
             "下一步我去把生产库的旧表删掉。",
@@ -81,11 +92,45 @@ class TestPromise(unittest.TestCase):
             "下一步我会发布到 npm。",
             "下一步我去部署到生产环境。",
             "Next step: I'll deploy to production and rotate the keys.",
-            "I'll delete the stale snapshots now.",
         ):
             got, reason = detect(s, 0, self.CFG)
-            self.assertFalse(got, f"hard boundary must be released, got {reason}: {s!r}")
-            self.assertEqual(reason, "boundary", s)
+            self.assertTrue(got, f"must reach the agent so the guard can fire: {s!r}")
+            self.assertEqual(reason, "trigger:promise", s)
+
+        # ⚠ 不带第一人称的两条本来就不命中 promise 触发器（既有行为，
+        #   与本次删词表无关）。它们是 no_trigger —— 不会 nudge，也就不会
+        #   误删数据；但也**没有得到护栏**。如实记录，不假装有保护。
+        for s in ("I'll delete the stale snapshots now.", "下一步我立刻付款。"):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertNotEqual(reason, "boundary", f"the word table is back: {s!r}")
+            self.assertIn(reason, ("no_trigger", "trigger:promise"), s)
+
+    def test_the_promise_guard_is_unconditional(self):
+        """护栏必须是**无条件清单**，不是「只有用户才有」的从句。
+
+        旧措辞 "needs something only the user has" 在 agent 持有 DB 凭据时为假
+        ⇒ 它会顺势删库/发版（红队 S1 阻断的原因）。
+        新措辞按**动作本身**判定，并明写「即使你有凭据也要问」。
+        """
+        from detector import PROMISE_NUDGE_TEMPLATE
+
+        low = PROMISE_NUDGE_TEMPLATE.lower()
+        for needed in (
+            "spending money",
+            "real-name",
+            "publishing, posting or shipping anything outward",
+            "deleting, overwriting or clearing data",
+            "deploying to a live/production system",
+            "merging to main",
+            "rotating credentials or keys",
+        ):
+            self.assertIn(needed, low)
+        # 无条件：明写「即使持有凭据 / 即使早先被授权过」
+        self.assertIn("even if you hold the credentials", low)
+        self.assertIn("even if you were", low)
+        # 不能退回成「只有用户才有」
+        self.assertNotIn("only the user has", low)
+        self.assertNotIn("something only the user", low)
 
     def test_real_blocker_is_not_a_promise(self):
         """真的需要用户提供东西 ⇒ 不 nudge（这里是 boundary/user_must 的活）。"""
@@ -300,15 +345,20 @@ class TestBoundaryDoesNotSwallowOtherTriggers(unittest.TestCase):
 
 
 class TestBoundaryDirection(unittest.TestCase):
-    """hard_boundary 必须两个方向都对，任一边偏就是事故。
+    """不可逆动作的护栏在哪：**在 nudge 文本里，不在 detector 的词表里**。
 
-    2026-10-29 走过的弯路（三轮红队各纠正一次）：
+    2026-10-29 走过的弯路（红队三轮 + 用户明令）：
       · 让 promise 抢在 boundary 前 ⇒ 「下一步我去付款开通」被 nudge（护栏回退）。
       · 自造一套 `hard_boundary` 名词表 ⇒ 10 条「边界词作定语」的真承诺被误放行。
       · 只拿 `hard_boundary` 挡 promise ⇒ 它是 boundary 的真子集，22 条不可逆
         承诺全被 nudge，14 条是 1.3.5 拦过的。
-    实测 boundary 单独覆盖 19/23，那套 41 行只额外给 2 条 ⇒ 整套删除。
-    ⇒ 现在的判据只有 boundary（1.3.5 那张表）+ 删掉其中「付费」一个名词。
+      · **最终：boundary 词表整块删除**（用户：「我从来没说过要加 boundary 词表」）。
+        实测那张表把 1430 条真实收尾里的 **510 条（36%）** 误放行 ——
+        语义是「这一条收尾在请求不可逆动作」，实现却是「tail 里出现过边界词」。
+
+    ⇒ 现在 detector **只判形状**（有没有问句/承诺/交棒），
+      判「这个动作是不是不可逆」交给被 nudge 的 agent 自己 ——
+      清单写在 nudge 模板里，且是**无条件**的（不依赖「谁持有凭据」）。
     """
 
     CFG: ClassVar[dict] = default_config()
@@ -334,50 +384,58 @@ class TestBoundaryDirection(unittest.TestCase):
         "Next step: I'll update the pricing page copy.",
     ]
 
-    # ⚠ 已知漏检：`boundary` 用「付款」「生产库」「deploy」「发布」这些词做**全局**
-    # 放行，于是含这些词作**定语**的真承诺会被放过。这是 1.3.5 就有的行为，不是
-    # 本次引入的回归；修它要动全局 boundary，会波及 offer / hand_off /
-    # question_mark 全部触发（2026-10-29 已因此造成一次「吞掉 12 条 nudge」）。
-    # ⇒ 取舍「宁可漏检，也不护栏回退」：把现状**钉住**，不假装它是 0。
-    KNOWN_MISSED: ClassVar[list[str]] = [
-        "下一步我去检查生产库的索引大小。",
-        "下一步我去把 deploy 脚本的 typo 修了。",
-        "下一步我去把付款按钮的颜色改成蓝色。",
-        "Next step: I'll review the deploy logs.",
-    ]
+    def test_the_word_table_is_gone(self):
+        """detector 里**不得再有** boundary 词表。
 
-    def test_hard_boundaries_are_released(self):
-        """不可逆/对外动作 ⇒ 一律 boundary 放行，不能被 promise 抢走。"""
+        这条是本文件的根：只要词表还在，「加一个词换一次误伤」的循环就会继续。
+        """
+        cfg = default_config()
+        self.assertNotIn(
+            "boundary",
+            cfg.get("exclusions", {}),
+            "the boundary word table is back — it was removed on 2026-10-29",
+        )
+
+    def test_hard_boundaries_reach_the_agent(self):
+        """不可逆承诺必须**到达 agent**（这样模板里的清单才能拦住它）。
+
+        旧行为：靠词表在 detector 里提前放行 ⇒ agent 收不到 nudge。
+        新行为：nudge 到达，agent 按模板第 1 条的**无条件清单**先问用户。
+
+        ⚠ 分两组：带第一人称的命中 `trigger:promise`；
+          不带第一人称的（「下一步就去…」「I'll delete… now.」）本来就不命中
+          promise 触发器 —— 那是 promise 召回的问题，与本次删除无关，
+          但也不能因此说它们被护栏拦住了（它们是 no_trigger，本来就不 nudge）。
+        """
         for s in self.HARD:
             got, reason = detect(s, 0, self.CFG)
-            self.assertFalse(got, f"hard boundary was nudged ({reason}): {s!r}")
-            self.assertEqual(reason, "boundary", s)
+            self.assertNotEqual(reason, "boundary", f"the word table is back: {s!r} → {reason}")
+            if got:
+                self.assertEqual(reason, "trigger:promise", s)
 
     def test_boundary_words_used_as_nouns_do_not_suppress_a_promise(self):
         """边界词作定语（删除逻辑/支付模块/定价页）⇒ 仍是承诺。"""
         for s in self.REVERSE:
             got, reason = detect(s, 0, self.CFG)
-            self.assertTrue(got, f"real promise was released as boundary: {s!r}")
+            self.assertTrue(got, f"real promise was released: {s!r}")
             self.assertEqual(reason, "trigger:promise", s)
 
-    # ⚠ 第四轮红队点名了 8 条不可逆句式（push 到 main / 改生产配置 / go live 类）。
-    # 1.4.1 **尝试**用三条新 boundary 规则覆盖它们，2026-10-29 又撤回 ——
-    # 每加一个词就换来一次新的误伤（付费 / 清空 / 生产配置 / 推送目标，
-    # 当天实测四次）。这 8 条在 1.3.5 下是 no_trigger（既不拦也不 nudge），
-    # 不是回归，保留为已知上限。⇒ 不修，如实记录。
-    #
-    # KNOWN_MISSED 里保留其中「安全相关」的那几条作为已知漏检的钉子。
+    def test_known_missed_shapes_are_now_caught(self):
+        """1.4.1 记下的 4 条「已知漏检」现在**不再是漏检**。
 
-    def test_known_missed_shapes_are_pinned_as_released(self):
-        """已知漏检必须**显式**钉住 —— 否则下轮有人「修好」一条又弄坏另一条。
-
-        这些是「边界词作定语」的真承诺，当前被 boundary 放行。断言它们**现在
-        被放行**，是为了让行为一变测试就红，必须有人明确决定。
+        它们当年漏检的原因是：全局 boundary 用「生产库 / deploy / 付款」这些词
+        做放行，于是含这些词作**定语**的真承诺被放过。词表删除后，
+        这 4 条全部正常触发。
         """
-        for s in self.KNOWN_MISSED:
+        for s in (
+            "下一步我去检查生产库的索引大小。",
+            "下一步我去把 deploy 脚本的 typo 修了。",
+            "下一步我去把付款按钮的颜色改成蓝色。",
+            "Next step: I'll review the deploy logs.",
+        ):
             got, reason = detect(s, 0, self.CFG)
-            self.assertFalse(got, f"expected known-missed, but now fires ({reason}): {s!r}")
-            self.assertEqual(reason, "boundary", s)
+            self.assertTrue(got, f"still missed ({reason}): {s!r}")
+            self.assertEqual(reason, "trigger:promise", s)
 
 
 class TestWiringCoverage(unittest.TestCase):
@@ -485,10 +543,17 @@ class TestDetectEn(unittest.TestCase):
         self.case("I can write the README for you, want me to?", True)
 
     def test_boundary_cost(self):
-        self.case("This will cost $69 — do you approve?", False)
+        """花钱的收尾必须**到达 agent**（护栏在 nudge 文本里，不在 detector 里）。
+
+        2026-10-29：boundary 词表已删除（用户明令）。它把 1430 条真实收尾里的
+        510 条（36%）误放行 —— 判的是「tail 里出现过边界词」，
+        而语义是「这一条收尾在请求不可逆动作」。
+        """
+        self.case("This will cost $69 — do you approve?", True)
 
     def test_boundary_publish(self):
-        self.case("Should I go ahead and publish this?", False)
+        """对外发布必须**到达 agent**（护栏在 nudge 文本里）。"""
+        self.case("Should I go ahead and publish this?", True)
 
     def test_done(self):
         self.case("Done. All tests pass.", False)
@@ -497,10 +562,14 @@ class TestDetectEn(unittest.TestCase):
         """Every one of these is user-only: money, credentials, destruction,
         publishing, or sending something to a third party.
 
-        They used to nudge, which told an English-speaking agent that asking
-        for a subscription, deleting production logs or emailing a customer
-        was its own call. The nudge text still asks the model to self-check,
-        but the exclusion layer is what the README promises.
+        2026-10-29：boundary 词表整块删除（用户明令：「我从来没说过要加
+        boundary 词表」）。那张表实测把 1430 条真实收尾里的 **510 条（36%）**
+        误放行 —— 判的是「tail 里出现过边界词」，而语义是「这一条收尾在请求
+        不可逆动作」。
+
+        ⇒ 这些收尾现在**必须到达 agent**，由 nudge 文本里的无条件清单处理。
+        英文 agent 同样适用：清单是英文的，且按**动作本身**判定，
+        不依赖「谁持有凭据」。
         """
         for text in (
             "This requires a paid subscription. Should I upgrade?",
@@ -522,7 +591,7 @@ class TestDetectEn(unittest.TestCase):
             "Should I push this to main?",
             "Should I merge the PR?",
         ):
-            self.case(text, False)
+            self.case(text, True)
 
     def test_english_triggers_are_case_insensitive(self):
         """`should i` is lowercase in the pattern, and "Should I…" starts the
@@ -640,9 +709,59 @@ class TestBadConfigNeverBreaksATurn(unittest.TestCase):
 
 
 class TestMoneyIsAlwaysABoundary(unittest.TestCase):
-    """The nudge must never carry the agent past spending money."""
+    """花钱这类动作，nudge 文本必须自带护栏。
 
-    def test_chinese_and_english_money(self):
+    2026-10-29：这里原来断言「money 结尾**不产生** nudge」，靠的是一张
+    我自己造的 boundary 词表（用户明令：「我从来没说过要加 boundary 词表」）。
+    那张表实测把 1430 条真实收尾里的 **510 条（36%）** 误放行 ——
+    语义是「这一条收尾在请求不可逆动作」，实现却是「tail 里出现过边界词」。
+
+    ⇒ 护栏改由 **nudge 文本**承担：detector 只判形状（有没有问句），
+      「我这条是不是在要用户批准花钱」由被 nudge 的 agent 自己判断 ——
+      它有上下文，比词表准。下面的断言检查的就是**这条护栏在文本里**。
+    """
+
+    def test_nudge_text_carries_the_money_guard(self):
+        """nudge 必须明写「花钱要先问用户」，且给出「只问一件事就停」的指令。"""
+        from detector import NUDGE_TEMPLATE
+
+        low = NUDGE_TEMPLATE.lower()
+        self.assertIn("spend money", low)
+        self.assertIn("real-name or identity verification", low)
+        self.assertIn("publish, post or ship anything outward", low)
+        self.assertIn("delete, overwrite or clear data", low)
+        self.assertIn("deploy to a live/production system", low)
+        self.assertIn("merge to main", low)
+        self.assertIn("rotate credentials or keys", low)
+        # 只问一件事、然后停下 —— 不能让 agent 自己往下推
+        self.assertIn("one short line", low)
+        self.assertIn("then stop", low)
+        # 判据是「动作本身」，不是「谁持有凭据」
+        self.assertIn("not about who owns the credential", low)
+
+    def test_promise_nudge_text_carries_the_same_guard(self):
+        """promise 版同样必须自带护栏（承诺要花钱时改成「问那一样东西」）。"""
+        from detector import PROMISE_NUDGE_TEMPLATE
+
+        low = PROMISE_NUDGE_TEMPLATE.lower()
+        self.assertIn("spending money", low)
+        self.assertIn("real-name or identity verification", low)
+        self.assertIn("publishing, posting or shipping anything outward", low)
+        self.assertIn("deleting, overwriting or clearing data", low)
+        self.assertIn("deploying to a live/production system", low)
+        self.assertIn("merging to main", low)
+        self.assertIn("rotating credentials or keys", low)
+        self.assertIn("single line", low)
+        # 无条件：即使持有凭据 / 即使早先被授权过，也要先问
+        self.assertIn("even if you hold the credentials", low)
+        self.assertIn("even if you were given permission", low)
+        self.assertIn("not about who owns the credential", low)
+
+    def test_money_endings_still_reach_the_agent(self):
+        """这些收尾必须被 nudge（否则 agent 会一直停在那儿等批准）。
+
+        护栏由 nudge 文本承担 ⇒ detector 不再靠词表提前放行。
+        """
         cfg = default_config()
         for text in (
             "要不要我买这个订阅？",
@@ -658,7 +777,8 @@ class TestMoneyIsAlwaysABoundary(unittest.TestCase):
             "Should I sign the contract?",
         ):
             got, reason = detect(text, 0, cfg)
-            self.assertFalse(got, f"{text} → {reason}")
+            self.assertTrue(got, f"{text} → {reason}（护栏在 nudge 文本里，不该在此拦）")
+            self.assertTrue(reason.startswith("trigger:"), f"{text} → {reason}")
 
 
 class TestMoneyBoundariesDoNotEatRealWork(unittest.TestCase):
@@ -686,6 +806,11 @@ class TestMoneyBoundariesDoNotEatRealWork(unittest.TestCase):
 
 class TestPublishingIsABoundary(unittest.TestCase):
     def test_publishing_and_shipping_outward(self):
+        """对外发布必须到达 agent —— 护栏在 nudge 文本的**无条件清单**里。
+
+        2026-10-29：boundary 词表删除（用户明令）。旧行为靠词表提前放行，
+        而那张表把 36% 的真实收尾误放行；护栏改由 nudge 文本承担。
+        """
         cfg = default_config()
         for text in (
             "要不要我发布到 npm？",
@@ -698,7 +823,9 @@ class TestPublishingIsABoundary(unittest.TestCase):
             "Should I push to main?",
         ):
             got, reason = detect(text, 0, cfg)
-            self.assertFalse(got, f"{text} → {reason}")
+            self.assertNotEqual(reason, "boundary", f"{text} → {reason}")
+            if got:
+                self.assertTrue(reason.startswith("trigger:"), f"{text} → {reason}")
 
 
 class TestQuotedAndCodeSpans(unittest.TestCase):
@@ -771,10 +898,12 @@ class TestNudge(unittest.TestCase):
             should, reason = detect(text, 0, cfg)
             self.assertFalse(should, f"{text!r} should not trigger ({reason})")
 
-    def test_english_boundaries_are_excluded(self):
-        """The English exclusion list has to cover the same boundaries as the
-        Chinese one — otherwise an English agent can talk itself into a
-        payment, a deletion or a publish."""
+    def test_english_boundaries_reach_the_agent(self):
+        """英文的不可逆动作收尾必须到达 agent（护栏在 nudge 文本里）。
+
+        2026-10-29：boundary 词表删除。护栏改为由 nudge 模板的**无条件清单**
+        承担，且清单是英文的 —— 英文 agent 拿到同样的保护。
+        """
         cfg = default_config()
         for text in (
             "This will cost $120 — I need your approval first.",
@@ -783,13 +912,69 @@ class TestNudge(unittest.TestCase):
             "Should I publish this to main?",
         ):
             should, reason = detect(text, 0, cfg)
-            self.assertFalse(should, f"{text!r} should not trigger ({reason})")
+            self.assertNotEqual(reason, "boundary", f"the word table is back: {text!r} → {reason}")
+            if should:
+                self.assertTrue(reason.startswith("trigger:"), f"{text!r} → {reason}")
 
     def test_english_permission_seeking_still_triggers(self):
         cfg = default_config()
         should, reason = detect("Should I also update the README?", 0, cfg)
         self.assertTrue(should)
         self.assertTrue(reason.startswith("trigger:"))
+
+
+class TestBoundaryOnlyAppliesToPushBackEndings(unittest.TestCase):
+    """2026-10-29 修：boundary 词表删除后，收尾必须**到达 agent**（护栏在模板里）。
+
+    事故原句（实测误伤）：一条正常的收尾提问，**正文里**出现过「有人付钱」，
+    于是整条被 boundary 放行 —— 钩子没工作，agent 该继续时被放过。
+
+    根因：boundary 的语义是「**这一条收尾**在请求一个不可逆动作」，
+    实现却是「**tail 里出现**边界词」。两件事被混为一谈。
+    实测（1430 条真实收尾）：510 条（36%）因此被放行，其中 407 条的边界词
+    根本不在收尾句。
+
+    修法（机制层，不动词表）：boundary 只对 offer / confirm_seek / hand_off
+    这三个「已在把决定推回用户」的触发器生效；泛问号不再触发它。
+    护栏没有变松：承诺不可逆动作仍由 promise 分支放行。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+
+    def test_a_body_mention_does_not_swallow_the_ending(self):
+        """正文提到边界词，不该把收尾的提问一起放行。"""
+        for text in (
+            # 事故原句的形状
+            "比值 0.05 只说明供给稀缺，不说明有人付钱——GitHub issue 里可能一半是 "
+            "AI 生成的功能请求。**要我开始做这个 SDK 吗？**",
+            "我们讨论过要不要花钱买 API 的事。**要我现在开始做这个 SDK 吗？**",
+            "上一轮提到过发布流程的问题。**要我继续吗？**",
+        ):
+            got, reason = detect(text, 0, self.CFG)
+            self.assertTrue(got, f"body mention swallowed the ending ({reason}): {text!r}")
+            self.assertEqual(reason, "trigger:question_mark", text)
+
+    def test_the_guard_still_holds_on_push_back_endings(self):
+        """护栏没有变松：这些收尾必须到达 agent，由模板的无条件清单处理。"""
+        for text in (
+            "要不要我付钱给他？",
+            "要不要我把钱转给他？",
+            "Should I pay the contractor?",
+            "Should I publish this to main?",
+        ):
+            got, reason = detect(text, 0, self.CFG)
+            self.assertTrue(got, f"must reach the agent so the guard can fire: {text!r}")
+            self.assertNotEqual(reason, "boundary", text)
+
+    def test_a_promise_of_an_irreversible_action_reaches_the_agent(self):
+        """承诺不可逆动作必须到达 agent（护栏在模板里，不在 detector 里）。"""
+        for text in (
+            "下一步我去付款开通。",
+            "Next step: I'll deploy to production.",
+        ):
+            got, reason = detect(text, 0, self.CFG)
+            self.assertTrue(got, f"promise guard lost ({reason}): {text!r}")
+            self.assertEqual(reason, "trigger:promise", text)
 
 
 if __name__ == "__main__":

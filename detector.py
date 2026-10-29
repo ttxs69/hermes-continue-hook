@@ -53,9 +53,17 @@ PROMISE_NUDGE_TEMPLATE = (
     "【continue-hook】Your last reply ended with a promise about what you would do next "
     "(e.g. 「下一步我去查…」/ 「Next I'll…」), and then the turn ended.\n"
     "You said you would do it — so do it now, in this turn.\n"
-    "1. If that next step needs something only the user has (credentials, a decision, "
-    "money, real-name identity, external publishing, deleting or overwriting data), "
-    "ask for that ONE thing in a single line, then stop.\n"
+    "1. BEFORE running anything, check the step you promised against this list:\n"
+    "   - spending money / buying / transferring funds / paying anyone;\n"
+    "   - real-name or identity verification, signing a contract;\n"
+    "   - publishing, posting or shipping anything outward (npm, PyPI, GitHub "
+    "release, a message to a customer, a live post);\n"
+    "   - deleting, overwriting or clearing data; deploying to a live/production "
+    "system; merging to main; rotating credentials or keys.\n"
+    "   If the promised step is any of these, ask the user for that ONE thing in a "
+    "single line and stop — even if you hold the credentials and even if you were "
+    "given permission earlier in this conversation. This check is about the action "
+    "itself, not about who owns the credential.\n"
     "2. Otherwise run it now: call the tool, read the result, then report result + "
     "verification + remaining risks.\n"
     "If you already carried that step out, say so in one line and stop — "
@@ -67,10 +75,13 @@ PROMISE_NUDGE_TEMPLATE = (
 NUDGE_TEMPLATE = (
     "【continue-hook】Your last reply ended by asking the user a question.\n"
     "Self-check once, per standing discipline:\n"
-    "1. Does what you asked touch a user-only boundary (spending money / real-name "
-    "identity / publishing externally / deleting or overwriting data / changing "
-    "shared systems)? If yes → re-ask in ONE short line (that single decision "
-    "only), then stop.\n"
+    "1. Does what you asked do any of these: spend money / buy / transfer funds / "
+    "pay someone; real-name or identity verification / sign a contract; publish, "
+    "post or ship anything outward (npm, PyPI, GitHub release, a message to a "
+    "customer, a live post); delete, overwrite or clear data; deploy to a "
+    "live/production system; merge to main; rotate credentials or keys?\n"
+    "   If yes → re-ask in ONE short line (that single decision only), then stop. "
+    "This check is about the action itself, not about who owns the credential.\n"
     "2. Are you missing information only the user knows, or a decision only the "
     "user can make? If yes → re-ask in ONE short line, then stop.\n"
     "3. Otherwise it is yours to do: do it now, then report result + verification "
@@ -193,51 +204,36 @@ DEFAULTS: dict = {
         # 只是话题词，不是动作）。真正不可逆的动作必须仍然在代码里短路。
         # User-only boundaries: money, identity, credentials, publishing,
         # destructive actions.
-        "boundary": [
-            # ⚠ 不含裸「付费」：中文里它几乎只作定语（付费用户/付费墙/付费转化/付费证据）。
-            # 真正的付费动作由 付款|付钱|买|购买|下单|充值|转账 覆盖。
-            # 2026-10-29：就是这个词让「下一步我去查…那是该品类的**付费**证据」
-            # 被整句放行 —— 而那句正是这个 feature 的起因。
-            "花钱|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
-            "买(?!账)|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱|报价",
-            # 「清空」带数据宾语才算破坏性动作：「旧逻辑已清空」不会命中，
-            # 「把旧数据清空」会。用宾语而不是裸词，避免重复「付费」的错误。
-            "对外发布|发布出去|删掉|清空.{0,4}(数据|表|库|记录|日志)|(数据|表|库|记录|日志).{0,4}(清空|删掉)|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她|公众号|子|列表|名单)|"
-            "发布(到|至|上)|推(送)?到|上线|导出.{0,4}(数据|客户|用户)|"
-            "npm|pypi|npmjs|github release|生产(环境|库|服务器)",
-            "生产环境|线上环境|主分支|改数据库|重启服务",
-            # Money, credentials, destructive actions and external sending are
-            # all user-only. The English list has to be as wide as the Chinese
-            # one — an English-speaking agent used to talk itself straight
-            # through a payment, a deletion or a send.
-            r"\b(paid|paying|prepay|subscription|upgrade to (pro|paid|premium))\b|"
-            r"\b(cost|costs|charge|charges|spend|spent|price|priced|budget|fee|fees)\b|"
-            # Money verbs need a money object. A bare `pay`/`buy`/`transfer`
-            # blocked ordinary work ("pay attention to the lint warnings",
-            # "transfer the helper into its own module") — 47% of realistic
-            # endings lost their nudge to this.
-            r"\b(payment|purchase|renew|refund|invoice|billing|subscription|paid)\b|"
-            r"\bpay(?:ing)?\b(?!\s+attention)\s*(?:for\b|the\b|\$|\d|him|her|them|it\b)|"
-            r"\bbuy\s+(?:the|a|an|this|that|it|them|more|\$|\d)\b|"
-            r"\b(?:wire|transfer|remit)\s+(?:the\s+|my\s+|our\s+)?(?:money|funds|amount|payment|\$|\d)|"
-            r"\bhire\s+(?:a\s+|an\s+|the\s+)?(?:contractor|freelancer|developer|dev|person|someone|agency|consultant)\b|"
-            r"\bsign\s+(?:the\s+)?(?:contract|agreement|deal|nda|quote)\b|"
-            r"\bget(?:ting)?\s+a\s+quote\b|"
-            r"[$€£¥]\s*\d|\d\s*(usd|eur|cny|rmb|dollars?)\b|"
-            r"\b(api key|api keys|secret|secrets|credential|credentials|token|"
-            r"access key|private key|ssh key|passphrase|password|2fa|otp|verification code)\b|"
-            r"\b(delete|deleting|deletion|remove|drop|truncate|purge|wipe|erase|"
-            r"overwrite|reset --hard|force[- ]push|rm -rf)\b|"
-            r"\b(publish|publishing|deploy|deploying|release|announce|tweet|"
-            r"post (it|this|that)|make (it|this) public|merge (it|this|the pr))\b|"
-            r"\b(send|email|e-?mail|forward|reply to|message|notify|dm|invoice)\b.{0,24}"
-            r"\b(client|customer|user|users|them|him|her|subscriber|list|audience|boss|team)\b|"
-            r"\b(production|prod|live (environment|server|site)|main branch|master branch)\b|"
-            r"\b(to|into|onto) (main|master|prod|production|the main branch|the master branch)\b|"
-            r"\bmerge\b.{0,20}\b(pr|pull request|branch)\b|"
-            r"\b(rotate|revoke) (the |my |our )?(credentials|keys?|tokens?)\b|"
-            r"\b(approve|approval|authorize|authorise|sign(ing)? (in|up) as you)\b",
-        ],
+        # ⚠⚠ 2026-10-29 整块删除（用户明令：「我从来没说过要加 boundary 词表」）。
+        #
+        # 这张表是我自己造的，从来不是用户的需求，而且实测有害：
+        #   · 语义是「**这一条收尾**在请求一个不可逆动作」，
+        #     实现却是「**tail 里出现**边界词」—— 两件事被混为一谈；
+        #   · 1430 条真实收尾里 **510 条（36%）因此被放行**，
+        #     其中 407 条的边界词根本不在收尾句，只在正文里出现过；
+        #   · 钩子基本没在工作（该 nudge 时被放过）。
+        #
+        # 为什么不需要它：**判据已经在 nudge 模板里**，而且判得更准。
+        #   PROMISE_NUDGE_TEMPLATE 第 1 条：
+        #     "If that next step needs something only the user has (credentials,
+        #      a decision, money, real-name identity, external publishing,
+        #      deleting or overwriting data), ask for that ONE thing in a
+        #      single line, then stop."
+        #   NUDGE_TEMPLATE 第 1 条：
+        #     "Does what you asked touch a user-only boundary (spending money /
+        #      real-name identity / publishing externally / deleting or
+        #      overwriting data / changing shared systems)? If yes → re-ask in
+        #      ONE short line, then stop."
+        # ⇒ 由**被 nudge 的 agent 自己**判断「我这条是不是在要用户批准不可逆动作」，
+        #   它知道上下文；词表只能猜。判「意思」的活交给会思考的那一方，
+        #   detector 只负责判「形状」（有没有问句/承诺）。
+        #
+        # ⚠ 加词只能推迟误伤、不能修根因（2026-10-29 实测：加一次词换一次误伤，
+        #   连续四次；方向/时态/征询/前置框架四种词表方案全部失败）。
+        #   **不要再往这张表里加词。**
+        #
+        # 保留 `boundary` 这个 reason 字符串是为了事件日志与旧 CLI 的兼容；
+        # 它不再由词表产生（见 detect()）。
         # Second-person requests: only the user can provide / decide this.
         "user_must": [
             "需要你|需要您|你告诉我|你来提供|等你(给|确认|决定之后)",
@@ -388,16 +384,25 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     # `push to npm` / `merge into main` / `rotate the production keys` 全漏，
     # 22 条不可逆承诺 22 条被 nudge。用更小的网取代更大的网 = 护栏回退。
     _promise_hit = (not _needs_user) and bool(_compile(tr.get("promise")).search(_promise_window))
-    if _promise_hit and (
-        _compile(ex.get("boundary")).search(tail) or _compile(ex.get("user_must")).search(tail)
-    ):
-        return False, "boundary"
+    # ---------------------------------------------------------------------
+    # ⚠⚠ 2026-10-29：boundary 词表整块删除（用户明令：「我从来没说过要加
+    # boundary 词表」）。它从来不是用户的需求，实测还把 1430 条真实收尾里的
+    # **510 条（36%）** 误放行 —— 语义是「这一条收尾在请求不可逆动作」，
+    # 实现却是「tail 里出现过边界词」，两件事被混为一谈。
+    #
+    # 现在 detector 只判**形状**（有没有问句/承诺/交棒），
+    # 判**意思**（「我这条是不是在要用户批准花钱/发布/删数据」）
+    # 交给被 nudge 的 agent 自己 —— 那段判据本来就写在 nudge 模板第 1 条里，
+    # 而且它有上下文，比词表准。
+    #
+    # ⚠ 所以：**不要在这里「补回」一张词表**。
+    #   加词只能推迟误伤、不能修根因（今天实测：加一次词换一次误伤，连续四次；
+    #   方向/时态/征询/前置框架四种词表方案全部失败）。
+    # ---------------------------------------------------------------------
     if _promise_hit:
         if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
             return False, "max_nudges"
         return True, "trigger:promise"
-    if _compile(ex.get("boundary")).search(tail):
-        return False, "boundary"
     if _compile(ex.get("user_must")).search(tail):
         return False, "user_must"
     # The closing window of the code-stripped text, so the "?" check only sees
