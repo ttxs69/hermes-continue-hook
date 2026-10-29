@@ -21,7 +21,7 @@ from typing import Any
 #   · `detect()` 里 promise 与 question_mark 各自的独立分支
 # 2026-10-29 红队实测：只把第 6 个键加进这里和配置，它**仍然静默走
 # no_trigger**，而原来的断言（两张手写表相等）会盖章说没问题 —— 测试剧场。
-# ⇒ 现在由 `TestWiringCoverage.test_each_trigger_actually_fires` 逐键跑
+# ⇒ 现在由 `TestTriggerDispatchIsReal.test_each_trigger_actually_fires` 逐键跑
 #   一个真实句子来证明它**真的能触发**，那才是能抓住漏登记的断言。
 DISPATCHED_TRIGGERS = frozenset({"promise", "offer", "hand_off", "confirm_seek", "question_mark"})
 
@@ -112,12 +112,18 @@ DEFAULTS: dict = {
             r"下一步[：:，,、]?\s*我(会|要|将|去|来|就)",
             # 中英混排无空格（红队实测「下一步I'll check the logs」原先漏检）
             r"下一步\s*I(?:'|’)ll\b",
-            r"接下来[：:，,、]?\s*我(会|要|将|去|来|就)",
+            r"接下来[：:，,、]?\s*我(会|要|将|去|来|就|打算|准备)",
+            # 承接词 + 第一人称（「然后我就去拉数据」「接着我来跑」）
+            r"(然后|接着|之后|随后)我(就)?(去|来|会|要)(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加|核对)",
             # 「稍后/待会」也是承诺的常见说法。
             # ⚠ (去|来|会) **必需**：「我这就跑完了」是已完成，把它当承诺是误伤
             # （红队语料 D1）。宁可漏「我这就跑数据」，也不误拦完成报告。
             r"我(这|现在|马上|立刻|随后|稍后|待会|一会儿)(就)?(去|来|会)"
-            r"(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加)",
+            r"(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加|再|核对|复核|确认|整理|过一遍)",
+            # 「我会去查」「我要去看」——情态词后再接趋向词，最自然的口语
+            r"我(会|要|将)(去|来)(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加|核对)",
+            # 「稍等，我去查」
+            r"(稍等|稍候|等我)[，,、]?\s*我(去|来)(查|看|做|写|改|跑|验|测|读|拉|试)",
             # 语序变体：「稍后我去看一下结果」——时间词在人称**前面**
             r"(稍后|待会|一会儿|回头)我(就)?(去|来|会)"
             r"(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加)",
@@ -229,7 +235,11 @@ DEFAULTS: dict = {
         # User-only boundaries: money, identity, credentials, publishing,
         # destructive actions.
         "boundary": [
-            "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
+            # ⚠ 不含裸「付费」：中文里它几乎只作定语（付费用户/付费墙/付费转化/付费证据）。
+            # 真正的付费动作由 付款|付钱|买|购买|下单|充值|转账 覆盖。
+            # 2026-10-29：就是这个词让「下一步我去查…那是该品类的**付费**证据」
+            # 被整句放行 —— 而那句正是这个 feature 的起因。
+            "花钱|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
             "买(?!账)|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱|付款|报价",
             "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她|公众号|子|列表|名单)|"
             "发布(到|至|上)|推(送)?到|上线|导出.{0,4}(数据|客户|用户)|"
@@ -420,9 +430,19 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     # ⚠ `hard_boundary` 只否掉 **promise 这一条路**，随后继续走下面的
     # boundary / user_must / offer / hand_off / question_mark。
     _promise_hit = (not _needs_user) and bool(_compile(tr.get("promise")).search(_promise_window))
-    if _promise_hit and _compile(ex.get("hard_boundary")).search(tail):
-        # 承诺本身就是不可逆/对外动作 ⇒ 直接放行，别让它掉进后面的
-        # offer / question_mark 被 nudge（那等于逼 agent 去做危险动作）。
+    if _promise_hit and (
+        _compile(ex.get("boundary")).search(tail)
+        or _compile(ex.get("hard_boundary")).search(tail)
+        or _compile(ex.get("user_must")).search(tail)
+    ):
+        # 承诺本身就是不可逆 / 对外 / 需要用户独有的东西 ⇒ 放行。
+        #
+        # ⚠ 2026-10-29 第三轮红队：`hard_boundary` 是 `boundary` 的**真子集**。
+        # 曾经只用 hard_boundary 挡 promise，于是 boundary 原本拦得住的
+        # `push` / `npm publish` / `merge into main` / `发到 npm` /
+        # `rotate the production keys` 全漏 —— 22 条不可逆承诺 22 条被 nudge，
+        # 其中 14 条是 1.3.5 曾经放行的。用更小的网取代更大的网 = 护栏回退。
+        # ⇒ boundary 与 hard_boundary 取**并集**，hard_boundary 只做补充。
         return False, "boundary"
     if _promise_hit:
         if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):

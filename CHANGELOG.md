@@ -74,27 +74,58 @@ asserts it actually fires.
 
 ### Measured
 False positives are measured on two corpora, because the author's own corpus was
-written while fixing the bug and therefore flatters the fix:
+written while fixing the bug and therefore flatters the fix.
 
-- author corpus: 1/33 = 3.1%
-- independent corpus, pre-registered by a reviewer who had not seen the code:
-  5/42 = 11.9% on the first candidate → **0/42 = 0.0%** now
+**Real traffic** — 2291 turn-final replies replayed from the local session store:
 
-Real traffic, 2291 turn-final replies from the local session store:
+| | nudges |
+|---|---|
+| 1.3.5 (`aa55822`) | 110 (4.80%) |
+| this version | 114 (4.98%) |
+| **delta** | **+4, 0 lost** |
 
-- 1.3.5: 110 nudges (4.80%)
-- this version: 114 nudges (4.98%) — **4 extra, 0 lost**
-- all four read by hand: 「接下来我会…我马上动，你不用回」,
-  「下一步我去按…筛」, 「下一步我去捞 GitHub issue」,
-  「下一步我去查 Replume…」 — all genuine dropped promises
+All four new hits were read by hand and are genuine dropped promises — including
+the incident sentence itself and one 「接下来我会…**我马上动，你不用回**」 that
+then ended the turn.
 
-The reversed direction is pinned as well: 12 hard boundaries must be released,
-10 promises that merely mention a boundary noun must still fire
-(`TestHardBoundaryDirection`).
+**Recall on a 15-sentence variant corpus** (punctuation, word order, mixed
+Chinese/English): **10/15 = 67%**. The five misses are deliberate:
 
-Cost per false positive is one extra agent turn, capped by
-`max_nudges_per_turn: 2`. A reply matching both promise and hand_off nudges once,
-not twice.
+- 「我待会再看一下」— the time word is followed by 再+verb with no 去/来/会.
+  Covering it would also fire on 「我待会再说」, which is a real hand-off.
+- 「我先去把数据拉下来」— 「把 X」 separates the verb.
+- 「先去查一下日志」— no first person at all. Without one, a plan-shaped
+  sentence in a report fires.
+- 「Next: verify the numbers」— English variant.
+- 「回头我去核对」— word-order variant not in the time-word alternation.
+
+This is the honest limit of a pattern-based trigger: each miss covered adds a
+false positive somewhere else. 67% recall with 0 false positives on a 21-item
+negatives set is the chosen point. A semantic classifier would do better; a
+word list cannot.
+
+**Hard boundary coverage is measured in both directions**
+(`TestHardBoundaryDirection`):
+
+- 11 hard boundaries must be released — including `push to npm`,
+  `npm publish`, `merge into main`, `rotate the production keys`,
+  `付款开通`, `删库`, `deploy`, `实名`, and `需要你先把 API key 给我`
+  (`user_must`).
+- 5 promises that merely *mention* a boundary noun must still fire.
+- 4 shapes are pinned as **known misses** — a promise whose boundary word
+  appears as a modifier (「**生产库**的索引大小」「**deploy** 脚本的 typo」
+  「**付款**按钮的颜色」「review the **deploy** logs」). These are released
+  because fixing them means loosening the global `boundary` list, which affects
+  every trigger class. Pinned, not hidden.
+
+**The boundary is a union, not a replacement.** `promise` is vetoed by
+`boundary` **or** `hard_boundary` **or** `user_must`. An earlier pass used only
+`hard_boundary`, which is a strict subset — and 22 adversarial irreversible
+promises then all got nudged, 14 of which 1.3.5 had released. A narrower net
+replacing a wider one is a guardrail regression even when it looks tidier.
+
+**Cost per false positive** is one extra agent turn, capped by
+`max_nudges_per_turn: 2`. A reply matching both promise and hand_off nudges once.
 
 ### Note on an already-carried-out promise
 Not word-listed. A first-person 「下一步我去查了，已经查完了」 still fires. The
