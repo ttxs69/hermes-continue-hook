@@ -360,6 +360,14 @@ class TestBoundaryDirection(unittest.TestCase):
             self.assertTrue(got, f"real promise was released as boundary: {s!r}")
             self.assertEqual(reason, "trigger:promise", s)
 
+    # ⚠ 第四轮红队点名了 8 条不可逆句式（push 到 main / 改生产配置 / go live 类）。
+    # 1.4.1 **尝试**用三条新 boundary 规则覆盖它们，2026-10-29 又撤回 ——
+    # 每加一个词就换来一次新的误伤（付费 / 清空 / 生产配置 / 推送目标，
+    # 当天实测四次）。这 8 条在 1.3.5 下是 no_trigger（既不拦也不 nudge），
+    # 不是回归，保留为已知上限。⇒ 不修，如实记录。
+    #
+    # KNOWN_MISSED 里保留其中「安全相关」的那几条作为已知漏检的钉子。
+
     def test_known_missed_shapes_are_pinned_as_released(self):
         """已知漏检必须**显式**钉住 —— 否则下轮有人「修好」一条又弄坏另一条。
 

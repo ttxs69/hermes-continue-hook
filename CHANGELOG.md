@@ -23,12 +23,24 @@ except two boundary words.
   today that adding a word bought one catch and cost one miss — recorded instead
   of patched.
 
-Still open, and deliberately not fixed here: eight irreversible phrasings are
-nudged where 1.3.5 neither blocked nor nudged them（`push 到 main`、
-`改生产配置`、`push the branch`、`go live` 类）. Adding `\bpush\b` or
-`live` to `boundary` would fire on 「push 通知」「live 环境」— the same
-word-list trap that cost three review rounds on `付费` and `清空`. Recorded,
-not patched.
+Still open, and deliberately not fixed here.
+
+The fourth review round named eight irreversible phrasings that get nudged where
+1.3.5 neither blocked nor nudged them (`push 到 main`, `改生产配置`,
+`push the branch`, `go live` / `take it live` / `ship it live`). A 1.4.1
+attempt to cover them with three new `boundary` rules was **reverted the same
+day**: adding a word bought one catch and cost one miss, four times over today
+(付费 / 清空 / 生产配置 / 推送目标). Those eight are 1.3.5 behaviour, not a
+regression, and they are recorded here rather than patched.
+
+One real false positive remains, from removing 「付费」 out of `boundary`:
+「**待你拍板**：赞赏和付费永久卡在「原创 0/3」…还是放弃这两条？」reads as
+`question_mark` where 1.3.5 let it through. One extra turn, capped at two.
+Same removal is what makes the feature's originating sentence fire at all.
+
+The general limit, stated once: this trigger decides from text alone, with
+patterns. Adding a word to catch one shape reliably releases another. The
+remaining shapes are left as they are.
 
 339 tests pass.
 
