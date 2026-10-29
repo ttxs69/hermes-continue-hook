@@ -21,11 +21,14 @@
   before they meet the tool. `engines` now states only `{"node": ">=18"}`,
   which is the real runtime floor.
 
-  The release-side requirements are still recorded in `.github/workflows/publish.yml`,
-  and a test now pins **both** sides: `engines` must not mention npm, and
-  the publish workflow's notes must still say which npm it needs. The old
-  test asserted the wrong thing — it required `engines` to carry the npm
-  floor, which is what caused the warning in the first place.
+  The release-side requirement stays in `.github/workflows/publish.yml`, and
+  the test that used to assert the wrong thing now asserts two
+  **machine-checkable** facts instead of a string in a comment: that
+  `publish.yml` still runs `npm stage publish` as an executable line, and
+  that `.nvmrc` pins a node major that ships npm 11 (measured: node 22.23.2
+  → npm 10.9.8, node 24.22.1 → npm 11.19.1). The old test required
+  `engines` to carry the npm floor — it enforced the very thing that caused
+  the warning.
 
 ## 1.3.2 (2026-10-28)
 
