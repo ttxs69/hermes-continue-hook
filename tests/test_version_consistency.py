@@ -140,14 +140,70 @@ class TestToolchainIsPinned(unittest.TestCase):
                     "The publish job must run the same npm as every other job.",
                 )
 
-    def test_engines_state_the_npm_floor(self) -> None:
+    def test_npm_floor_lives_in_the_release_workflow_not_in_engines(self) -> None:
+        """npm 版本是**发布工具**的约束，不是**使用者**的约束。
+
+        2026-10-29 实测事故：engines 里写着 `"npm": ">=11.15.0"`（来自
+        `npm stage publish` 的要求）。结果每个用默认 npm 跑
+        `npx @ttxs69/hermes-continue-hook --help` 的人都会看到
+
+            npm warn EBADENGINE  required: { npm: '>=11.15.0' }
+                                 current:  { npm: '10.9.8' }
+
+        包本身 rc=0 跑得起来，但对一个「陌生人 1 分钟试用」的 CLI，
+        这行警告足以让人关掉页面 —— 约束放错了位置就成了交付缺陷。
+
+        正确位置：发布 workflow（只有它知道自己要 stage publish）+ .nvmrc 单一事实源。
+
+        ⚠ 本测试**不能**靠断言 publish.yml 注释里出现了 "11.15.0" 这几个字
+        来「锁住」版本要求 —— 注释会被人改写，那种断言是一扇只会红、
+        不会挡的门（2026-10-29 独立红队指出）。这里断言的是两件
+        **机器可执行**的事实：
+          ① publish.yml 里 `npm stage publish` 是**真正会跑的命令**（不是注释行）；
+          ② .nvmrc 钉的 node 主版本 ≥ 24 —— 因为 npm 11 只随 node 24 发布
+             （实测：node 22.23.2 → npm 10.9.8；node 24.22.1 → npm 11.19.1），
+             所以「node 主版本够高」才是「npm 够新」的可执行代理。
+        """
         import json
 
         package = json.loads((REPO / "package.json").read_text(encoding="utf-8"))
         engines = package.get("engines", {})
-        self.assertIn("npm", engines, "package.json engines must state the npm floor")
-        # `npm stage publish` needs 11.15.0+; trusted publishing needs 11.5.1+.
-        self.assertIn("11.15.0", engines["npm"])
+
+        self.assertNotIn(
+            "npm",
+            engines,
+            "engines 里不许写 npm：那是发布流程的要求，写进 engines 会让每个用默认 "
+            "npm 的使用者看到 EBADENGINE 警告。发布侧要求请留在 publish.yml。",
+        )
+        self.assertIn("node", engines, "engines.node 必须显式声明运行时下界")
+
+        # ① 发布路径必须真的在跑 stage publish（注释行不算）
+        publish_lines = (
+            (REPO / ".github" / "workflows" / "publish.yml")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        executable = [
+            ln.strip()
+            for ln in publish_lines
+            if "npm stage publish" in ln and not ln.strip().startswith("#")
+        ]
+        self.assertTrue(
+            executable,
+            "publish.yml 里找不到可执行的 `npm stage publish` 行（只有注释不算）。"
+            "staging 是免 2FA 的那条发布路径，它没了就没有无人值守的发布。",
+        )
+
+        # ② node 主版本必须够新（npm 11 随 node 24 发布）
+        pinned = (REPO / ".nvmrc").read_text(encoding="utf-8").strip()
+        major = int(pinned.split(".")[0])
+        self.assertGreaterEqual(
+            major,
+            24,
+            f".nvmrc 钉的是 node {pinned}。npm 11（trusted publishing 需 11.5.1+、"
+            "`npm stage publish` 需 11.15.0+）只随 node 24 发布：实测 node 22.23.2 "
+            "带的是 npm 10.9.8，node 24.22.1 才是 11.19.1。",
+        )
 
     def test_no_workflow_upgrades_npm(self) -> None:
         for workflow in sorted((REPO / ".github" / "workflows").glob("*.yml")):
