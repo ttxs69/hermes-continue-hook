@@ -2,120 +2,107 @@
 
 ## 1.4.0 (2026-10-29)
 
-A new trigger class: **announced-but-undone**.
-
-- **The gap:** every existing trigger fires when the agent pushes a decision back
-  to the user — an offer (`要不要我…`), a hand-off (`交给你定`), a confirmation
-  (`这样可以吗`), or any closing question mark. None of them fires when the agent
-  says what it *will do next* and then ends the turn. That reply has no question
-  mark and asks for nothing; it silently drops the work.
-
-- **The incident:** asked what came next, the agent ended a reply with
-  「下一步我去查 Replume 有没有定价页和真实客户证言」 and stopped. The task it had
-  just described never ran. Live, this is the exact behaviour the hook exists to
-  prevent, and it was going undetected.
-
-- **`triggers.promise`** matches an announced next step in the **closing tail
-  only** — a narrative 「下一步是…」 in the middle of a report does not fire, and a
-  promise that was already carried out (`…我已经部署完了`) does not either.
-  Chinese and English forms are both covered.
-
-- **`promise` is evaluated before the boundary exclusions.** The real closing
-  sentence above contains 「付费**证据**」 — a noun — and `boundary`'s 「付费」
-  matched it, releasing the whole reply. Word lists cannot tell a noun from an
-  intent, and adding words only moves the hole. A stated next step is not a
-  question being asked, so it is judged first; the promise nudge's first clause
-  already covers the boundary case ("if that step needs something only the user
-  has, ask for that one thing and stop").
-
-- **`build_nudge(attempt, reason)`** takes the reason, so a promise gets its own
-  text ("you said you would do it — do it now") instead of the offer text.
-
-- `_first_trigger_hit` now names `promise` in its dispatch tuple. Adding a key to
-  `triggers` without naming it there is a silent no-op — that is how the first
-  version of this change produced `no_trigger` on every test case.
-
-- 10 new tests in `TestPromise` (including the live incident sentence verbatim,
-  the noun-collision case, and both regression directions).
-
-- **False positives are measured, not assumed.** The first version of this
-  trigger fired on 6 of 33 hand-written reply shapes (18.2%) — three from the
-  double-judgement bug above, two from a `next step` pattern that did not
-  require a first-person actor, one from an already-carried-out promise.
-  `TestPromiseFalsePositiveBudget` now pins those 33 shapes to a <10% budget
-  (current 3.1%), nails the code-block bug, asserts `promise` is not
-  double-judged, and pins recall so tightening cannot silently kill it.
-
-- **Measured on real traffic**, not just constructed cases: replaying the 1430
-  real turn-final assistant replies in the local session store,
-  1.3.5 nudges 31 (2.2%), this version nudges 34 (2.4%) — 3 extra, all
-  `trigger:promise`. The trigger fires on ~0.2% of real turns.
-
-- 329 tests pass.
-
-## 1.4.0 (2026-10-29)
-
 A fifth trigger class: **announced-but-undone**.
 
-- **The gap.** Every existing trigger fires when the agent pushes a decision back
-  to the user — `offer` (要不要我…), `hand_off` (交给你定), `confirm_seek`
-  (这样可以吗), or a closing question mark. None fires when the agent says what it
-  *will do next* and then ends the turn. That reply has no question mark and asks
-  for nothing; the work is silently dropped.
+### The gap
+Every existing trigger fires when the agent pushes a decision back to the user —
+`offer` (要不要我…), `hand_off` (交给你定), `confirm_seek` (这样可以吗), or a
+closing question mark. None fires when the agent says what it *will do next* and
+then ends the turn. That reply asks for nothing and carries no question mark, so
+the step it just described is silently dropped.
 
-- **The incident.** Asked what came next, the agent ended a reply with
-  「下一步我去查 Replume 有没有定价页和真实客户证言」 and stopped. The step it had
-  just described never ran.
+The incident that started this: asked what came next, the agent ended a reply
+with 「下一步我去查 Replume 有没有定价页和真实客户证言」 and stopped. It never ran.
 
-- **`triggers.promise`** matches a **first-person** announced next step in the
-  closing tail only. Requiring a first person is deliberate: `\bnext step\b`
-  alone fired on "next step is **your call**" and "the next step **needs your**
-  decision", both of which hand the decision back to the user — the opposite of
-  what this trigger exists to catch. Punctuation and spacing variants
-  (「下一步：我去…」「下一步，我会…」「下一步I'll…」) and English forms
-  (`Next I'll`, `Next up: I'll`, `My next step is`) are covered.
+### `triggers.promise`
+Matches a **first-person** announced next step, in the closing tail only.
+Requiring a first person is the whole point — a bare `\bnext step\b` also fired
+on "next step is **your call**" and "the next step **needs your** decision",
+both of which hand the decision back to the user, the opposite of this trigger's
+purpose. Punctuation and spacing variants (「下一步：我去…」「下一步，我会…」
+「下一步I'll…」「稍后我去…」) and English forms (`Next I'll`, `Next up: I'll`,
+`My next step is`) are covered.
 
-- **Hard boundaries still short-circuit.** `exclusions.hard_boundary` (paying,
-  deleting/overwriting, publishing/deploying, force-push, real-name identity)
-  is evaluated **before** `promise`. An earlier iteration put `promise` first and
-  turned 「下一步我去付款开通」and「下一步我去把生产库的旧表删掉」from a
-  code-level release into a nudge. The nudge text's own escape hatch is about
-  *things only the user has* — but an agent holding DB credentials and an npm
-  token satisfies that trivially, so a prose escape hatch is not a guardrail.
-  Hard boundaries stay in code.
+### Where the boundary sits — and where it must not sit
+`exclusions.hard_boundary` covers irreversible and outward-facing actions:
+paying, deleting or overwriting, publishing, deploying, force-pushing, rotating
+keys, real-name identity. Two separate mistakes were made and fixed here, both
+caught by review rather than by the author:
 
-- **`build_nudge(attempt, reason)`** — a promise gets its own text instead of the
-  offer text. Wired through `hookctl.py`, `__init__.py`, patch mode and all six
-  shell adapters; `TestWiringCoverage` scans the source tree so a call site that
-  forgets the reason fails the suite.
+**1. The boundary had become prose.** An earlier version let `promise` run ahead
+of `boundary` and relied on the nudge text to say "ask first if you need
+something only the user has". That is a *possession* test, not an
+*irreversibility* test — an agent holding DB credentials and an npm token
+satisfies it trivially. 「下一步我去付款开通」 and 「下一步我去把生产库的旧表删掉」
+went from code-level releases in 1.3.5 to nudges. The boundary is back in code.
 
-- **`promise` is judged in exactly one place** (detect, on the code-stripped
-  window). Registering it in `_first_trigger_hit`'s dispatch tuple as well caused
-  a second judgement on the raw tail, which is how a fenced `# TODO:` block
-  fired. `DISPATCHED_TRIGGERS` now declares every evaluated key in one place and
-  a test asserts it equals the configured keys.
+**2. Then it was too wide — and then in the wrong place.** Keying
+`hard_boundary` on boundary *nouns* released seven genuine promises that merely
+mentioned one (「下一步我去看一下**发布**日志」「下一步我去把**删除**逻辑改成软删」
+「下一步我去把 **deploy** 脚本的 typo 修了」「下一步我去把**付款**按钮的颜色改成蓝色」).
+It now keys on **position**: the boundary word must follow a modal or directional
+verb (去/要/会/将/就/马上/立刻/现在/这就/直接), or form an explicit destructive
+structure (把X删掉, drop table, force-push). English requires first-person future
+("I'll deploy"), not a bare verb anywhere in the sentence.
 
-- **False positives are measured on two corpora, not one.** An independent red
-  team wrote a pre-registered corpus of 42 shapes; the author's own corpus was
-  written while fixing the bug, so it flatters the fix. Current numbers:
-  - author corpus: 1/33 = 3.1%
-  - independent corpus: **0/26 = 0.0%** after the boundary fix
-    (11.9% before it — 4 of those were the boundary regression)
-  `TestPromiseFalsePositiveBudget` pins a <10% budget so this cannot drift.
+At one point the check also sat at the top of `detect()` and short-circuited
+**every** trigger rather than just `promise`. Replaying real turn-final replies:
+that version went *below* 1.3.5 — it ate nudges that 1.3.5 had produced, purely
+because the tail window contained 「发布链路」 or 「未发布」. It now only vetoes the
+promise path; the rest of the chain (offer / hand_off / confirm_seek /
+question_mark) runs unchanged.
 
-- **Real traffic.** Replaying 1430 real turn-final replies from the local session
-  store: 1.3.5 nudges 31 (2.2%), this version nudges 34 (2.4%) — 3 extra, all
-  `trigger:promise`. Two are genuine dropped promises; one is a cron hand-off
-  report's `待办:` backlog list, which is why the `待办`/`TODO` pattern now also
-  requires a first person.
+### Wiring
+`build_nudge(attempt, reason)` gives a promise its own text. An earlier pass
+wired only the six shell adapters, leaving `hookctl.py`, `__init__.py` and the
+patch-mode generator on the old one-argument signature — the Hermes plugin would
+have sent the *offer* text ("your last reply ended by asking the user a
+question") for a promise. `TestWiringCoverage` scans the source tree for
+`build_nudge` calls that omit the reason.
 
-- **Known cost.** A false positive costs one extra agent turn (bounded by
-  `max_nudges_per_turn: 2`; a reply matching both promise and hand_off nudges
-  once, not twice). An already-carried-out promise is deliberately **not**
-  word-listed — the nudge text offers the exit ("if you already carried that step
-  out, say so in one line"). That trade is bounded and one-directional.
+`promise` is judged in exactly one place, on the code-stripped window.
+Registering it in `_first_trigger_hit`'s tuple as well caused a second judgement
+on the raw tail, which is how a fenced `# TODO:` block fired.
 
-- 333 tests pass.
+`DISPATCHED_TRIGGERS` is a **declaration, not a dispatch table** — the real
+dispatch is the `_first_trigger_hit` tuple plus two branches inside `detect()`,
+and adding a sixth key there does *not* make it fire. The test that used to
+assert "the two hand-written tables are equal" was theatre: it stayed green
+while a new key silently fell through to `no_trigger`. It is replaced by
+`TestTriggerDispatchIsReal`, which runs one real sentence per configured key and
+asserts it actually fires.
+
+### Measured
+False positives are measured on two corpora, because the author's own corpus was
+written while fixing the bug and therefore flatters the fix:
+
+- author corpus: 1/33 = 3.1%
+- independent corpus, pre-registered by a reviewer who had not seen the code:
+  5/42 = 11.9% on the first candidate → **0/42 = 0.0%** now
+
+Real traffic, 2291 turn-final replies from the local session store:
+
+- 1.3.5: 110 nudges (4.80%)
+- this version: 114 nudges (4.98%) — **4 extra, 0 lost**
+- all four read by hand: 「接下来我会…我马上动，你不用回」,
+  「下一步我去按…筛」, 「下一步我去捞 GitHub issue」,
+  「下一步我去查 Replume…」 — all genuine dropped promises
+
+The reversed direction is pinned as well: 12 hard boundaries must be released,
+10 promises that merely mention a boundary noun must still fire
+(`TestHardBoundaryDirection`).
+
+Cost per false positive is one extra agent turn, capped by
+`max_nudges_per_turn: 2`. A reply matching both promise and hand_off nudges once,
+not twice.
+
+### Note on an already-carried-out promise
+Not word-listed. A first-person 「下一步我去查了，已经查完了」 still fires. The
+nudge text offers the exit ("if you already carried that step out, say so in one
+line"), and the trade is bounded: one extra turn, after which the chain closes
+because the follow-up carries no promise.
+
+338 tests pass.
 
 ## 1.3.5 (2026-10-29)
 

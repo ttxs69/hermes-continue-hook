@@ -230,6 +230,74 @@ class TestPromiseFalsePositiveBudget(unittest.TestCase):
             self.assertEqual(reason, "trigger:promise")
 
 
+class TestTriggerDispatchIsReal(unittest.TestCase):
+    """每个配置里的 trigger 键，都必须能用一句真实话证明它**真的会触发**。
+
+    2026-10-29 红队 S6：原来的断言是「DISPATCHED_TRIGGERS 与配置里的键相等」——
+    两张手写的表相等，两边一起错就永远绿。实测：只把第 6 个键加进配置和那张
+    声明表，它仍然静默走 `no_trigger`，而那断言盖章说没问题。
+    这是测试剧场：它测的是「我声明了」，不是「它工作」。
+
+    ⇒ 唯一能抓住漏登记的断言是：逐键跑一句话，看它是否触发。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+
+    # 每个键配一句真实的收尾话。新加键必须同时在这里补一句，
+    # 否则 test_every_configured_trigger_has_a_witness 会红。
+    WITNESS: ClassVar[dict[str, str]] = {
+        # ⚠ 见证句不能自带问号：`question_mark` 的优先级高于 offer/hand_off，
+        # 一句带「？」的 offer 只会返回 question_mark，那样这个键等于没被证明。
+        "promise": "下一步我去查一下定价页。",
+        "offer": "要不要我顺手把它也改了。",
+        "hand_off": "剩下的就交给你决定。",
+        "confirm_seek": "这样可以吗，我不确定。",
+        "question_mark": "要我现在就跑吗？",
+    }
+
+    def test_every_configured_trigger_has_a_witness(self):
+        configured = set(self.CFG["triggers"])
+        self.assertEqual(
+            configured - set(self.WITNESS),
+            set(),
+            "配置里有 trigger 没有见证句 —— 补一句到 WITNESS，否则它可能根本不生效",
+        )
+
+    def test_each_trigger_actually_fires(self):
+        for key, sentence in self.WITNESS.items():
+            got, reason = detect(sentence, 0, self.CFG)
+            self.assertTrue(got, f"trigger {key!r} never fires for {sentence!r}")
+            self.assertEqual(reason, f"trigger:{key}", key)
+
+
+class TestBoundaryDoesNotSwallowOtherTriggers(unittest.TestCase):
+    """P0（2026-10-29 红队第二轮）：hard_boundary 曾被放在 detect() 最顶端，
+    短路的不只是 promise，而是**所有**触发。
+
+    1422 条真实回复回放：1.3.5 nudge 28 (1.97%) → 那一版 nudge 16 (1.13%)，
+    少 12 条（6 question_mark / 4 hand_off / 3 offer）。被吞的正是这个 hook
+    存在的理由 —— 只因为尾窗里出现了「发布链路」「未发布」这类**名词**。
+
+    ⇒ hard_boundary 只否掉 promise 这一条路。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+
+    CASES: ClassVar[list[tuple[str, str]]] = [
+        ("要我现在就把这个加固做了吗？顺便说，上次发布很顺利。", "trigger:question_mark"),
+        ("继续干？还是有别的事？发布的事回头说。", "trigger:question_mark"),
+        ("都听你的。另外发布链路上周就修好了。", "trigger:hand_off"),
+        ("要我把这个改造任务布置给赚钱 cron 吗？发布流程我熟。", "trigger:question_mark"),
+        ("要不要我继续优化这块。旧的删除逻辑我已经清空了。", "trigger:offer"),
+    ]
+
+    def test_boundary_word_in_tail_does_not_swallow_nudge(self):
+        for sentence, expected in self.CASES:
+            got, reason = detect(sentence, 0, self.CFG)
+            self.assertTrue(got, f"nudge was swallowed by a boundary noun: {sentence!r}")
+            self.assertEqual(reason, expected, sentence)
+
+
 class TestHardBoundaryDirection(unittest.TestCase):
     """hard_boundary 必须两个方向都对，任一边偏就是事故。
 

@@ -23,10 +23,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-# ⚠ 所有会被真正判定的 trigger 键，**集中声明在这一处**。
-# 2026-10-29 红队 S6：注册逻辑原来散在 3 个地方（元组 + 两个独立分支），
-# 加第 6 个键仍会静默走 no_trigger。测试断言 set(triggers) == DISPATCHED，
-# 任何一边漏了都会红。
+# ⚠ 这是**声明**，不是分发表 —— 真正的分发在：
+#   · `_first_trigger_hit()` 的元组（offer / hand_off / confirm_seek）
+#   · `detect()` 里 promise 与 question_mark 各自的独立分支
+# 2026-10-29 红队实测：只把第 6 个键加进这里和配置，它**仍然静默走
+# no_trigger**，而原来的断言（两张手写表相等）会盖章说没问题 —— 测试剧场。
+# ⇒ 现在由 `TestWiringCoverage.test_each_trigger_actually_fires` 逐键跑
+#   一个真实句子来证明它**真的能触发**，那才是能抓住漏登记的断言。
 DISPATCHED_TRIGGERS = frozenset({"promise", "offer", "hand_off", "confirm_seek", "question_mark"})
 
 __all__ = ["DEFAULTS", "ConfigStore", "build_nudge", "default_config", "detect"]
@@ -114,17 +117,24 @@ DEFAULTS: dict = {
             # ⚠ 不含「先」：「关于下一步：我**先**做了 A/B 对比」是回顾，不是承诺
             # （红队语料 B3，2026-10-29 实测误伤）。
             r"下一步[：:，,、]?\s*我(会|要|将|去|来|就)",
+            # 中英混排无空格（红队实测「下一步I'll check the logs」原先漏检）
+            r"下一步\s*I(?:'|’)ll\b",
             r"接下来[：:，,、]?\s*我(会|要|将|去|来|就)",
             # 「稍后/待会」也是承诺的常见说法。
             # ⚠ (去|来|会) **必需**：「我这就跑完了」是已完成，把它当承诺是误伤
             # （红队语料 D1）。宁可漏「我这就跑数据」，也不误拦完成报告。
             r"我(这|现在|马上|立刻|随后|稍后|待会|一会儿)(就)?(去|来|会)"
             r"(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加)",
+            # 语序变体：「稍后我去看一下结果」——时间词在人称**前面**
+            r"(稍后|待会|一会儿|回头)我(就)?(去|来|会)"
+            r"(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加)",
             r"(下面|接着)[：:，,、]?\s*我(会|要|去|来|跑)",
             # ⚠ 要求同行有第一人称：红队实测「遗留 TODO：把 3 个 flaky 测试改成
             # deterministic（已记进 issue）」和 cron 交棒报告里的「待办：C406 / C407」
             # 都被误拦 —— 那些是 backlog 清单，不是本轮承诺。
-            r"(待办|TODO)[:：]\s*(我|I\b)",
+            # ⚠ 红队实测：「TODO: I/O 相关的重构放到下周」命中 `I\b`；
+            # 「待办：我们下周再看这块」命中裸「我」。两者都是 backlog，不是承诺。
+            r"(待办|TODO)[:：]\s*(我(?!们)|I\s+[a-z])",
             r"\bnext,? i(?:'|’)ll\b",
             r"\bi(?:(?:'|’)ll| will) (?:now |then |go )?(?:check|look|do|write|run|read|verify|pull|try|fix|build)\b",
             r"\bmy next step (?:is|will)\b",
@@ -199,6 +209,17 @@ DEFAULTS: dict = {
             r"(去|要|会|将|就|马上|立刻|现在|这就|直接)\s*"
             r"(付款|支付|充值|下单|购买|转账|打钱|汇款|签约|签合同|删掉|清空|覆盖|"
             r"发布|上线|部署|实名|认证)",
+            # 情态词 + 英文动词（「下一步我去 deploy 到生产环境」）
+            r"(去|要|会|将|就|马上|立刻|现在|这就|直接)\s*"
+            r"(deploy|publish|release|push|pay|purchase|delete|drop|truncate)\b",
+            # 「去做实名认证」这类中间夹一个泛动词的写法
+            r"(去|要|会|将)\s*(做|搞|弄|走)\s*(实名|认证|备案|付款|充值|发布|上线|部署)",
+            # 密钥轮换 / 改生产配置 本身就是不可逆（正反序都要：
+            # 「轮换生产环境的密钥」与「把密钥轮换一下」是同一件事）
+            r"(轮换|重签|吊销|revoke|rotate)\s*.{0,6}(密钥|证书|token|key)",
+            r"把.{0,10}(密钥|证书|token|生产配置|线上配置|主表|生产库).{0,8}"
+            r"(轮换|重签|吊销|删|改|清|换|drop)",
+            r"(改|写|删|清|换|重启|扩容|缩容).{0,6}(生产环境|线上环境|生产配置|线上配置|生产库|线上库)",
             # 目标 + 完成体动作（「把 X 删掉」这类明确结构）。
             # ⚠ 不収裸「删除」——「把**删除**逻辑改成软删」里的「删除」是名词。
             r"把.{0,20}(删掉|删了|清空|清掉了|覆盖掉)",
@@ -371,16 +392,20 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     tr = cfg.get("triggers", {})
     trig_tail = _QUOTE_RE.sub("", tail)  # quoted mentions are not asks
     # ---------------------------------------------------------------------
-    # `promise` is checked BEFORE the boundary exclusions, on purpose.
+    # `promise` 的判定顺序（2026-10-29 两轮红队各纠正一次，见下）
     #
-    # 2026-10-29 实测：真实收尾句「下一步我去查…有没有定价页和真实客户证言——
-    # 那是该品类的**付费**证据…」被 boundary 的「付费」命中而整句放行。
-    # 那是名词（"付费证据"），不是「我要去付款」—— 词表分不出来，加词表只会再漏。
+    # 为什么 promise 要**先于** `boundary` 排除：
+    #   真实收尾句「下一步我去查…有没有定价页和真实客户证言——那是该品类的
+    #   **付费**证据…」被 boundary 的「付费」命中而整句放行。那是名词
+    #   （"付费证据"），不是「我要去付款」—— 词表分不出来，加词表只会再漏。
     #
-    # 优先级理由：boundary 存在的目的是「别打断用户真正的提问」；
-    # 而 promise 是「agent 自己说要去做，却没做就结束回合」—— 它不是提问。
-    # 即使那一步真的触及边界，PROMISE_NUDGE_TEMPLATE 的第 1 条已经写明
-    # 「若需要用户独有的东西，就用一句话问那一件事然后停」⇒ 分支仍然安全。
+    # 但 `hard_boundary` **只能挡 promise 自己**，不能做全局早退：
+    #   上一版把它放在 detect() 最顶端，于是它短路了 offer / hand_off /
+    #   question_mark 全部触发。1422 条真实回复回放：1.3.5 nudge 28 (1.97%)，
+    #   那一版 nudge 16 (1.13%) —— **被吞掉 12 条**，其中 6 条 question_mark、
+    #   4 条 hand_off、3 条 offer。被吞的原句比如
+    #   「要我现在就把这个加固做了吗？顺便说，上次发布很顺利。」（尾窗含「发布」）
+    #   ⇒ 护栏从「拦太多」变成「几乎什么都不拦」。
     # ---------------------------------------------------------------------
     # ⚠ 必须用**剥掉代码块与引用**的 tail：`tail` 是原文，代码块里的
     # `# TODO: refactor` 会被当成承诺（2026-10-29 误伤实测，中英文各一条）。
@@ -392,11 +417,14 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
         r"next step is blocked (on|by)|下一步(卡|阻塞)在",
         _promise_window,
     )
-    # ⚠ 顺序：hard_boundary 必须先短路，promise 才能判。
-    # 理由见 exclusions.hard_boundary 的注释（2026-10-29 红队阻断项 S1）。
-    if _compile(ex.get("hard_boundary")).search(tail):
+    # ⚠ `hard_boundary` 只否掉 **promise 这一条路**，随后继续走下面的
+    # boundary / user_must / offer / hand_off / question_mark。
+    _promise_hit = (not _needs_user) and bool(_compile(tr.get("promise")).search(_promise_window))
+    if _promise_hit and _compile(ex.get("hard_boundary")).search(tail):
+        # 承诺本身就是不可逆/对外动作 ⇒ 直接放行，别让它掉进后面的
+        # offer / question_mark 被 nudge（那等于逼 agent 去做危险动作）。
         return False, "boundary"
-    if not _needs_user and _compile(tr.get("promise")).search(_promise_window):
+    if _promise_hit:
         if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
             return False, "max_nudges"
         return True, "trigger:promise"
