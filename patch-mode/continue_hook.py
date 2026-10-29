@@ -56,6 +56,8 @@ PROMISE_NUDGE_TEMPLATE = (
     "ask for that ONE thing in a single line, then stop.\n"
     "2. Otherwise run it now: call the tool, read the result, then report result + "
     "verification + remaining risks.\n"
+    "If you already carried that step out, say so in one line and stop — "
+    "that is a complete answer, not a repeat.\n"
     "Do not repeat the promise. Either do it, or name the single blocker.\n"
     "(auto nudge #{attempt}; do not mention this nudge in your final reply.)"
 )
@@ -93,15 +95,24 @@ DEFAULTS: dict = {
         # turn without doing it. This is worse than an offer — an offer at least asks;
         # this one silently drops the work. Matched on the CLOSING TAIL only, so a
         # narrative "下一步是…" in the middle of a report does not fire.
+        # ⚠ 只抓「第一人称 + 动词」的承诺。
+        # 2026-10-29 误伤实测（33 条真实回复里 6 条被误拦，18.2%）：
+        #   · `\bnext step\b` 太宽 —— "next step is **your call**"（交给用户）
+        #     和 "next step **needs your** decision"（要用户决定）都被当成承诺；
+        #   · 「下一步**要** API key，你发我」里「要」是"需要"不是"将要"；
+        #   · 代码块里的 `# TODO:` 被当成承诺（因为 tail 取的是原文，见 detect()）。
+        # ⇒ 收紧成必须出现第一人称，或明确的"我将要做"动词。
         "promise": [
-            r"下一步(我)?(会|要|去|来|就|先)",
-            r"接下来(我)?(会|要|去|来|就|先)",
+            r"下一步我(会|要|将|去|来|就|先)",
+            r"下一步(会|将|去|来)(?!要你)",
+            r"接下来我(会|要|将|去|来|就|先)",
             r"我(这|现在|马上|立刻|随后)(就)?(去|来)(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加)",
-            r"(下面|接着)(我)?(会|要|去|来)",
+            r"(下面|接着)我(会|要|去|来)",
             r"(待办|TODO)[:：]",
             r"\bnext,? i(?:'|’)ll\b",
             r"\bi(?:(?:'|’)ll| will) (?:now |then |go )?(?:check|look|do|write|run|read|verify|pull|try|fix|build)\b",
-            r"\bnext step\b",
+            r"\bmy next step (?:is|will)\b",
+            r"\bnext step:? (?:i|we)(?:'|’)?(?:ll| will)\b",
             r"\bthen i(?:(?:'|’)ll| will)\b",
             r"\blet me (?:do|check|look|run|verify) (?:that|this) next\b",
         ],
@@ -274,8 +285,12 @@ def _first_trigger_hit(triggers: dict, tail: str) -> str | None:
     # ⚠ 这里是**唯一**决定「哪些 trigger 会被检查」的地方 —— 只在 triggers 配置里
     # 加一个键、不在这里登记，那个键永远不会生效（2026-10-29 实测：promise 加了配置
     # 却全量 no_trigger，就是因为漏了这一行）。
-    # 顺序即优先级：promise 放最前 —— 「说了要做却不做」比「问用户要不要」更严重。
-    for name in ("promise", "offer", "hand_off", "confirm_seek"):
+    #
+    # ⚠ `promise` **故意不在这里**：它在 detect() 里已经用「剥掉代码块/引用后的窗口」
+    # 单独判定过一次（并且排在 boundary 之前）。放进这个元组会让它在这里被
+    # **原文 tail** 再判一遍 —— 2026-10-29 实测：代码块里的 `# TODO:` 正是这样
+    # 二次命中的，明明前面已经用干净窗口排除了。
+    for name in ("offer", "hand_off", "confirm_seek"):
         if _compile(triggers.get(name)).search(tail):
             return name
     return None
@@ -309,7 +324,16 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     # 即使那一步真的触及边界，PROMISE_NUDGE_TEMPLATE 的第 1 条已经写明
     # 「若需要用户独有的东西，就用一句话问那一件事然后停」⇒ 分支仍然安全。
     # ---------------------------------------------------------------------
-    if _compile(tr.get("promise")).search(trig_tail):
+    # ⚠ 必须用**剥掉代码块与引用**的 tail：`tail` 是原文，代码块里的
+    # `# TODO: refactor` 会被当成承诺（2026-10-29 误伤实测，中英文各一条）。
+    _promise_window = _QUOTE_RE.sub("", stripped[-tail_chars:])
+    # 「下一步需要你…」不是承诺，是要用户给东西 —— 明确排除。
+    _needs_user = re.search(
+        r"下一步(要|需要)(你|您)|next step (needs|requires) (your|the user)|"
+        r"next step is your|下一步(是)?(你|您)的?(决|定|选择|call)",
+        _promise_window,
+    )
+    if not _needs_user and _compile(tr.get("promise")).search(_promise_window):
         if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
             return False, "max_nudges"
         return True, "trigger:promise"

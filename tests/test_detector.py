@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -87,6 +88,105 @@ class TestPromise(unittest.TestCase):
         self.assertIn("do it now", txt)
         # offer 的文案不能串到 promise 上
         self.assertNotIn("ended by asking the user a question", txt)
+
+
+class TestPromiseFalsePositiveBudget(unittest.TestCase):
+    """误伤预算：正常回复被退回给 agent 是这个包最贵的失败模式。
+
+    2026-10-29 第一版 promise 触发在 33 条真实形态的回复上误伤了 6 条（18.2%），
+    其中三条是同一个 bug（代码块里的 `# TODO:` 被当成承诺）、两条是
+    `\bnext step\b` 没要求第一人称、一条是已兑现。差点就这样发出去。
+    ⇒ 把「误伤率」本身写成断言，而不是靠每次手动试。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+    BUDGET: ClassVar[float] = 0.10  # >10% 不放行
+
+    # 全部是「不该被拦」的真实回复形态（中英文、长短、代码、数据、引用、已完成）
+    NEGATIVE: ClassVar[list[str]] = [
+        "## Summary\nThe migration completed. 12 tables updated.\n\n## Next steps\n1. Monitor error rates\n2. Update the runbook",
+        "Done. Next steps: review the diff and merge.",
+        "The next step needs your decision on the pricing tier.",
+        "Implemented all three items.\n\nTODO (for you):\n- approve the deploy\n- rotate the key",
+        "下一步是把它部署到 staging。我已经部署完了，日志显示 healthy。",
+        "下一步计划已经写进 design.md 第 3 节，本轮到此结束。",
+        "这次充值花了 200 元，账单截图在附件里。",
+        "v1.2.0 已经发布到 npm，registry 读回版本号一致。",
+        "删除了 43 个过期快照，磁盘从 91% 降到 61%。",
+        "统计结果：41 篇文章，阅读中位 36，分享率 7.2%，判断型 9 篇。",
+        "改了 3 个文件：detector.py 新增 promise 触发，hookctl.py 透传 reason。325 测试全绿。",
+        "结论：这个方向不做，因为竞品已经覆盖 5 项能力中的全部。",
+        "文档里写着「下一步我们会上线 CLI」，那是作者的原话。",
+        'The README says "Next I will add tests" - that is the author\'s roadmap.',
+        "```python\n# TODO: refactor this\nx = 1\n```\n改完了，测试通过。",
+        "```\n// TODO: handle null\n```\nFixed and verified.",
+        "完整流程：采集 → 渲染 → 发布。三步都跑通了。",
+        "我这就跑完了，输出 exit 0，用时 3.2 秒。",
+        "你说「接下来我会先看数据」，我就按这个做了。",
+        'The plan you wrote says "then I\'ll deploy". I only did the build.',
+        "好，收到。",
+        "跑完了，结果如上。",
+        "Done - all 325 tests pass.",
+        "下一步需要你决定用哪个方案，A 还是 B。",
+        "下一步要 API key，你把 key 发我我就跑。",
+        "本次排查完成。根因是 ruff 的 exclude 对显式文件路径不生效。已修 hook。",
+        "Root cause found: the formatter skips the exclude list for explicit paths.",
+        "步骤：1. 读数据 2. 分类 3. 写结论。三个都做完了。",
+        "I checked the next release notes; nothing breaking.",
+        "下一步当时是把目录复制过去，已经做完了。",
+        "I will note that the run took 3 minutes. It did.",
+        "我说过下一步去查定价，查完了：没有公开定价页。",
+    ]
+
+    def test_false_positive_rate_is_within_budget(self):
+        fired = [(x, detect(x, 0, self.CFG)) for x in self.NEGATIVE]
+        bad = [(x, r) for x, (got, r) in fired if got]
+        rate = len(bad) / len(self.NEGATIVE)
+        self.assertLess(
+            rate,
+            self.BUDGET,
+            f"false-positive rate {rate:.1%} exceeds {self.BUDGET:.0%}; fired on: "
+            + "; ".join(f"{r}::{x[:60]!r}" for x, r in bad),
+        )
+
+    def test_code_blocks_never_fire(self):
+        """单独钉住那个 bug：代码块里的 TODO 不是承诺。"""
+        for s in (
+            "```python\n# TODO: refactor\n```\n改完了。",
+            "```\n// TODO: handle null\n```\nFixed.",
+            "```\n# 下一步我来改这里\n```\n已经改完了。",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertFalse(got, f"{reason} fired on a code block: {s!r}")
+
+    def test_promise_is_not_double_judged(self):
+        """`promise` 不能在 _first_trigger_hit 里被原文 tail 再判一次。"""
+        import inspect
+
+        from detector import _first_trigger_hit
+
+        src = inspect.getsource(_first_trigger_hit)
+        self.assertNotIn(
+            '"promise"',
+            src,
+            "promise must be judged only in detect(), on the code-stripped window",
+        )
+
+    def test_recall_is_intact(self):
+        """收紧正则不能把真承诺漏掉。"""
+        for s in (
+            "下一步我去查 Replume 定价。",
+            "接下来我会验证这个假设。",
+            "我这就去拉数据。",
+            "下面我会先跑一遍测试。",
+            "Next I'll check their pricing page.",
+            "I will run the verification now.",
+            "My next step is to audit the logs.",
+            "下一步会补齐测试。",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertTrue(got, f"missed a real promise: {s!r}")
+            self.assertEqual(reason, "trigger:promise")
 
 
 class TestDetectZh(unittest.TestCase):
