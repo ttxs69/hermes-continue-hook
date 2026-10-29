@@ -216,14 +216,27 @@ class TestToolchainIsPinned(unittest.TestCase):
             "请改用 node 24.18.0+ 或 node 26.3.0+。",
         )
 
-        # 够用的下界：node 24.18.0（npm 11.16.0）、node 26.3.0（npm 11.16.0）
-        floor = (24, 18, 0)
-        self.assertGreaterEqual(
-            node,
-            floor,
-            f".nvmrc 钉的是 node {pinned}。npm 11（trusted publishing 需 11.5.1+、"
-            "`npm stage publish` 需 11.15.0+）最早出现在 node 24.18.0（自带 npm 11.16.0）；"
-            "node 24.0.0 自带的是 11.3.0，不够。",
+        # 够用的 node 版本**区间**（白名单，不是「下限」）。
+        #
+        # 为什么不能用「下限」：node 26.0.0–26.2.0 的版本号高于 24.18.0，
+        # 但它们自带 npm 11.12.1 / 11.13.0，**不够** 11.15.0。
+        # ⇒ 用「≥ 某个下限」会把这些版本放过去（独立红队 2026-10-29 的 BREAK D/E 抓的就是这个）。
+        #
+        # 区间数据来自 nodejs.org/dist/index.json（每个发行版自带哪个 npm 是官方元数据）：
+        #   node 24.18.0 → 24.x 末：整段连续自带 npm 11.16.0+ ✅
+        #   node 25.x   整版：自带 npm ≤ 11.12.1 ❌（奇数线带更旧的 npm）
+        #   node 26.3.0 → 26.x 末：整段连续自带 npm 11.16.0+ ✅
+        #
+        # **白名单而非黑名单**：新的大版本（比如 node 27）默认被拒，
+        # 要先在这里登记它自带 npm 的实际情况 —— 宁可误拒，不可误放。
+        allowed = [((24, 18, 0), (25, 0, 0)), ((26, 3, 0), (27, 0, 0))]
+        in_allowed = any(lo <= node < hi for lo, hi in allowed)
+        self.assertTrue(
+            in_allowed,
+            f".nvmrc 钉的是 node {pinned}，不在「自带 npm >= 11.15.0」的已知区间内。"
+            f"已知区间：{allowed}（node 25.x 整版不够，奇数线带更旧的 npm）。"
+            "若这是新的大版本，请先在 nodejs.org/dist/index.json 核对它自带的 npm 版本，"
+            "再把区间加进 ALLOWED_NODE_RANGES —— 未知版本默认拒绝。",
         )
 
     def test_no_workflow_upgrades_npm(self) -> None:

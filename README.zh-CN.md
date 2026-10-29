@@ -286,6 +286,7 @@ node bin/continue-hook.js install --host all
 | OpenCode | `--host opencode` | plugin 装到 `~/.config/opencode/plugin/` |
 | Pi | `--host pi` | extension 装到 `~/.pi/agent/extensions/` |
 | DeepSeek Harness | `--host dsh` | `npm install && npm run build`，然后 `dsh plugin add <dir>` |
+| 可移植 skill 层 | `--host skills` | 写 `SKILL.md` + `AGENTS.md`——给的是规则，不是强制续一轮 |
 
 有 manifest 格式的那些 host，其 plugin marketplace 直接读本仓库里的文件。已有：Claude Code
 （`.claude-plugin/`）、Codex（`.codex-plugin/`）、Cursor（`.cursor-plugin/`）、Kimi

@@ -308,6 +308,7 @@ Host-by-host:
 | OpenCode | `--host opencode` | plugin goes to `~/.config/opencode/plugin/` |
 | Pi | `--host pi` | extension goes to `~/.pi/agent/extensions/` |
 | DeepSeek Harness | `--host dsh` | `npm install && npm run build`, then `dsh plugin add <dir>` |
+| Portable skills layer | `--host skills` | writes `SKILL.md` + `AGENTS.md` — the rule, not a forced turn |
 
 Plugin marketplaces for the hosts that have a manifest format read the files
 in this repo. Present: Claude Code (`.claude-plugin/`), Codex
