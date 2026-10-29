@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import unittest
 from pathlib import Path
 
@@ -137,7 +138,12 @@ class TestNegativeControl(unittest.TestCase):
         做法：临时把主判据用的 `engines_problems` 换成一个**永远通过**的替身，
         负对照必须随之失败 —— 如果负对照仍然通过，说明它自己在玩自己的规则。
         """
-        import tests.test_engines as mod
+        # ⚠ 不能写 `import tests.test_engines`：
+        #   `unittest discover -s tests` 会把 tests/ 插到 sys.path[0]，
+        #   此处的模块名是 `test_engines` 而不是 `tests.test_engines`；
+        #   CI 跑 py3.10–3.13 时恰好带了仓库根 ⇒ 绿；本地 py3.14 ⇒ ModuleNotFoundError。
+        #   用 sys.modules[__name__] 拿当前模块，两种调用方式都成立。
+        mod = sys.modules[__name__]
 
         original = mod.engines_problems
         try:

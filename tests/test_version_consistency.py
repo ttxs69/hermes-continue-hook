@@ -300,6 +300,11 @@ class TestProjectHygiene(unittest.TestCase):
                 or "node_modules" in path.parts
                 or ".venv" in path.parts
                 or "venv" in path.parts
+                # ⚠ 2026-10-29 修：.git/ 不是源码，而是会「跟着最近一次提交说明变」的瞬时数据。
+                #   不加这条，本测试的结果取决于最后一条 commit message 写了什么 ——
+                #   实测撞到 .git/COMMIT_EDITMSG 里有一句复现命令的路径就整条变红。
+                #   要检查的是**要发布的文件**，不是版本库内部。
+                or ".git" in path.parts
             ):
                 continue
             try:
@@ -319,6 +324,9 @@ class TestProjectHygiene(unittest.TestCase):
             if not path.is_file() or path.suffix in {".png", ".jpg", ".pyc"}:
                 continue
             if "__pycache__" in path.parts or "node_modules" in path.parts:
+                continue
+            # 同 test_no_local_absolute_paths：.git/ 是瞬时数据，不是要发布的文件
+            if ".git" in path.parts:
                 continue
             try:
                 text = _read(path)
