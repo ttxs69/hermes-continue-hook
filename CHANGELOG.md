@@ -36,7 +36,22 @@ A new trigger class: **announced-but-undone**.
   version of this change produced `no_trigger` on every test case.
 
 - 10 new tests in `TestPromise` (including the live incident sentence verbatim,
-  the noun-collision case, and both regression directions). 325 tests pass.
+  the noun-collision case, and both regression directions).
+
+- **False positives are measured, not assumed.** The first version of this
+  trigger fired on 6 of 33 hand-written reply shapes (18.2%) — three from the
+  double-judgement bug above, two from a `next step` pattern that did not
+  require a first-person actor, one from an already-carried-out promise.
+  `TestPromiseFalsePositiveBudget` now pins those 33 shapes to a <10% budget
+  (current 3.1%), nails the code-block bug, asserts `promise` is not
+  double-judged, and pins recall so tightening cannot silently kill it.
+
+- **Measured on real traffic**, not just constructed cases: replaying the 1430
+  real turn-final assistant replies in the local session store,
+  1.3.5 nudges 31 (2.2%), this version nudges 34 (2.4%) — 3 extra, all
+  `trigger:promise`. The trigger fires on ~0.2% of real turns.
+
+- 329 tests pass.
 
 ## 1.3.5 (2026-10-29)
 
