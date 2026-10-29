@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -16,6 +17,415 @@ from detector import (
     default_config,
     detect,
 )
+
+
+class TestPromise(unittest.TestCase):
+    """陈述式承诺：「下一步我去 X」然后交回合。
+
+    2026-10-29 实测事故：agent 在回复末尾写「下一步我去查 Replume 有没有定价页」，
+    然后直接结束了回合 —— 四类原有触发（offer / hand_off / confirm_seek /
+    question_mark）**一个都没命中**，因为它既没有问号、也没把决定推给用户，
+    而是自己承认还有活，却把回合交了。这是 continue-hook 要防的事的**子集**，
+    但原来完全漏检。
+    """
+
+    CFG = default_config()
+
+    def case(self, text, expect, note=""):
+        got, reason = detect(text, 0, self.CFG)
+        self.assertEqual(got, expect, f"{note} {text!r} -> {reason}")
+        return reason
+
+    def test_the_actual_incident(self):
+        """真实原句：含「付费证据」这个名词，不能让 boundary 放行。"""
+        reason = self.case(
+            "下一步我去查 Replume 有没有定价页和真实客户证言"
+            "——那是该品类的付费证据，也是我唯一还能从这次撞车拿到的东西。",
+            True,
+            "the incident that motivated this class",
+        )
+        self.assertEqual(reason, "trigger:promise")
+
+    def test_short_promise(self):
+        self.case("下一步我去查 Replume 定价。", True)
+
+    def test_colloquial_variants(self):
+        for s in ("接下来我会验证这个假设。", "我这就去拉数据。", "下面我会先跑一遍测试。"):
+            self.case(s, True, "colloquial promise")
+
+    def test_english_promise(self):
+        for s in (
+            "Next I'll check their pricing page.",
+            "I will run the verification now.",
+            "Then I'll pull the numbers.",
+        ):
+            self.case(s, True, "english promise")
+
+    def test_promise_beats_boundary_noun(self):
+        """boundary 里的「付费」会被「付费证据」这个名词误命中 ⇒ promise 先判。"""
+        self.case("下一步我去看它的付费数据。", True, "noun must not mask a promise")
+
+    def test_promise_touching_a_hard_boundary_is_released(self):
+        """⚠ 红线：承诺本身是**不可逆/对外**动作 ⇒ 必须放行，不能 nudge。
+
+        2026-10-29 红队阻断项 S1：上一版让 promise 抢在 boundary 之前，
+        于是「下一步我去付款开通」「下一步我去把生产库的旧表删掉」从 1.3.5 的
+        代码级放行变成被 nudge。那份 nudge 文案的豁免写的是「需要用户独有的东西」
+        （持有物判据），而 agent 手里有 DB 凭据、有 npm token 时这条为假 ——
+        它完全可以顺势删库/发版。**用散文替代硬门 = 护栏回退。**
+        """
+        for s in (
+            "下一步我要付款开通，需要你批准。",
+            "下一步我去把生产库的旧表删掉。",
+            "下一步我去把旧数据清空。",
+            "下一步我会发布到 npm。",
+            "下一步我去部署到生产环境。",
+            "Next step: I'll deploy to production and rotate the keys.",
+            "I'll delete the stale snapshots now.",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertFalse(got, f"hard boundary must be released, got {reason}: {s!r}")
+            self.assertEqual(reason, "boundary", s)
+
+    def test_real_blocker_is_not_a_promise(self):
+        """真的需要用户提供东西 ⇒ 不 nudge（这里是 boundary/user_must 的活）。"""
+        self.case("下一步需要你提供 API key，我没有凭据。", False, "genuine blocker")
+
+    def test_narrative_next_step_does_not_fire(self):
+        """正文里叙述「下一步是…」且已完成 ⇒ 不该拦。"""
+        self.case("这个方案下一步是把它部署到 staging，我已经部署完了。", False)
+
+    def test_finished_report_does_not_fire(self):
+        self.case("本次排查完成：读了 41 条标题，分类统计如下。结论已写进 GOAL.md R296。", False)
+        self.case("报告写完了。整个流程：collect → render → publish，三步都跑通了。", False)
+
+    def test_promise_nudge_text_is_specific(self):
+        """promise 有自己的文案：说明「你说了要做，现在就做」。"""
+        txt = build_nudge(0, "trigger:promise")
+        self.assertIn("promise about what you would do next", txt)
+        self.assertIn("do it now", txt)
+        # offer 的文案不能串到 promise 上
+        self.assertNotIn("ended by asking the user a question", txt)
+
+
+class TestPromiseFalsePositiveBudget(unittest.TestCase):
+    """误伤预算：正常回复被退回给 agent 是这个包最贵的失败模式。
+
+    2026-10-29 第一版 promise 触发在 33 条真实形态的回复上误伤了 6 条（18.2%），
+    其中三条是同一个 bug（代码块里的 `# TODO:` 被当成承诺）、两条是
+    `\bnext step\b` 没要求第一人称、一条是已兑现。差点就这样发出去。
+    ⇒ 把「误伤率」本身写成断言，而不是靠每次手动试。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+    BUDGET: ClassVar[float] = 0.10  # >10% 不放行
+
+    # 全部是「不该被拦」的真实回复形态（中英文、长短、代码、数据、引用、已完成）
+    NEGATIVE: ClassVar[list[str]] = [
+        "## Summary\nThe migration completed. 12 tables updated.\n\n## Next steps\n1. Monitor error rates\n2. Update the runbook",
+        "Done. Next steps: review the diff and merge.",
+        "The next step needs your decision on the pricing tier.",
+        "Implemented all three items.\n\nTODO (for you):\n- approve the deploy\n- rotate the key",
+        "下一步是把它部署到 staging。我已经部署完了，日志显示 healthy。",
+        "下一步计划已经写进 design.md 第 3 节，本轮到此结束。",
+        "这次充值花了 200 元，账单截图在附件里。",
+        "v1.2.0 已经发布到 npm，registry 读回版本号一致。",
+        "删除了 43 个过期快照，磁盘从 91% 降到 61%。",
+        "统计结果：41 篇文章，阅读中位 36，分享率 7.2%，判断型 9 篇。",
+        "改了 3 个文件：detector.py 新增 promise 触发，hookctl.py 透传 reason。325 测试全绿。",
+        "结论：这个方向不做，因为竞品已经覆盖 5 项能力中的全部。",
+        "文档里写着「下一步我们会上线 CLI」，那是作者的原话。",
+        'The README says "Next I will add tests" - that is the author\'s roadmap.',
+        "```python\n# TODO: refactor this\nx = 1\n```\n改完了，测试通过。",
+        "```\n// TODO: handle null\n```\nFixed and verified.",
+        "完整流程：采集 → 渲染 → 发布。三步都跑通了。",
+        "我这就跑完了，输出 exit 0，用时 3.2 秒。",
+        "你说「接下来我会先看数据」，我就按这个做了。",
+        'The plan you wrote says "then I\'ll deploy". I only did the build.',
+        "好，收到。",
+        "跑完了，结果如上。",
+        "Done - all 325 tests pass.",
+        "下一步需要你决定用哪个方案，A 还是 B。",
+        "下一步要 API key，你把 key 发我我就跑。",
+        "本次排查完成。根因是 ruff 的 exclude 对显式文件路径不生效。已修 hook。",
+        "Root cause found: the formatter skips the exclude list for explicit paths.",
+        "步骤：1. 读数据 2. 分类 3. 写结论。三个都做完了。",
+        "I checked the next release notes; nothing breaking.",
+        "下一步当时是把目录复制过去，已经做完了。",
+        "I will note that the run took 3 minutes. It did.",
+        "我说过下一步去查定价，查完了：没有公开定价页。",
+        # ── 以下来自独立红队的**预注册**语料（2026-10-29），作者自己的语料里没有这些形态 ──
+        "Build green. My next step is blocked on the DNS record only you can add",
+        "检查完了：注册流程下一步会跳到实名页，不是 bug",
+        "剩下的是你的活。待办：1. 审批这个 PR",
+        "遗留 TODO：把 3 个 flaky 测试改成 deterministic（已记进 issue #41）",
+        "Shipped. Next, I'd suggest a different approach - that's your call",
+        "All 41 classified. Next step: the taxonomy needs your sign-off",
+        "待办：C406 / C407 交棒给下一轮",
+        "下一步是等 CI 跑完，不过已经跑过了，全绿",
+    ]
+
+    def test_false_positive_rate_is_within_budget(self):
+        fired = [(x, detect(x, 0, self.CFG)) for x in self.NEGATIVE]
+        bad = [(x, r) for x, (got, r) in fired if got]
+        rate = len(bad) / len(self.NEGATIVE)
+        self.assertLess(
+            rate,
+            self.BUDGET,
+            f"false-positive rate {rate:.1%} exceeds {self.BUDGET:.0%}; fired on: "
+            + "; ".join(f"{r}::{x[:60]!r}" for x, r in bad),
+        )
+
+    def test_code_blocks_never_fire(self):
+        """单独钉住那个 bug：代码块里的 TODO 不是承诺。"""
+        for s in (
+            "```python\n# TODO: refactor\n```\n改完了。",
+            "```\n// TODO: handle null\n```\nFixed.",
+            "```\n# 下一步我来改这里\n```\n已经改完了。",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertFalse(got, f"{reason} fired on a code block: {s!r}")
+
+    def test_promise_is_not_double_judged(self):
+        """`promise` 不能在 _first_trigger_hit 里被原文 tail 再判一次。"""
+        import inspect
+
+        from detector import _first_trigger_hit
+
+        src = inspect.getsource(_first_trigger_hit)
+        self.assertNotIn(
+            '"promise"',
+            src,
+            "promise must be judged only in detect(), on the code-stripped window",
+        )
+
+    def test_recall_of_punctuation_and_mixed_forms(self):
+        """红队实测：12 条变体里原先漏 7 条 —— 标点与混排必须召回。"""
+        for s in (
+            "下一步：我去查定价页。",
+            "下一步，我会验证这个假设。",
+            "接下来，我会先跑测试。",
+            "下一步 I'll check their pricing page.",
+            "我稍后去查一下。",
+            "下面我跑一下测试。",
+            "Next up: I'll audit the logs.",
+            "Next steps: I'll verify and report.",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertTrue(got, f"missed a punctuation/mixed form: {s!r}")
+            self.assertEqual(reason, "trigger:promise", s)
+
+    def test_recall_is_intact(self):
+        """收紧正则不能把真承诺漏掉。"""
+        for s in (
+            "下一步我去查 Replume 定价。",
+            "接下来我会验证这个假设。",
+            "我这就去拉数据。",
+            "下面我会先跑一遍测试。",
+            "Next I'll check their pricing page.",
+            "I will run the verification now.",
+            "My next step is to audit the logs.",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertTrue(got, f"missed a real promise: {s!r}")
+            self.assertEqual(reason, "trigger:promise")
+
+
+class TestTriggerDispatchIsReal(unittest.TestCase):
+    """每个配置里的 trigger 键，都必须能用一句真实话证明它**真的会触发**。
+
+    2026-10-29 红队 S6：原来的断言是「DISPATCHED_TRIGGERS 与配置里的键相等」——
+    两张手写的表相等，两边一起错就永远绿。实测：只把第 6 个键加进配置和那张
+    声明表，它仍然静默走 `no_trigger`，而那断言盖章说没问题。
+    这是测试剧场：它测的是「我声明了」，不是「它工作」。
+
+    ⇒ 唯一能抓住漏登记的断言是：逐键跑一句话，看它是否触发。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+
+    # 每个键配一句真实的收尾话。新加键必须同时在这里补一句，
+    # 否则 test_every_configured_trigger_has_a_witness 会红。
+    WITNESS: ClassVar[dict[str, str]] = {
+        # ⚠ 见证句不能自带问号：`question_mark` 的优先级高于 offer/hand_off，
+        # 一句带「？」的 offer 只会返回 question_mark，那样这个键等于没被证明。
+        "promise": "下一步我去查一下定价页。",
+        "offer": "要不要我顺手把它也改了。",
+        "hand_off": "剩下的就交给你决定。",
+        "confirm_seek": "这样可以吗，我不确定。",
+        "question_mark": "要我现在就跑吗？",
+    }
+
+    def test_every_configured_trigger_has_a_witness(self):
+        configured = set(self.CFG["triggers"])
+        self.assertEqual(
+            configured - set(self.WITNESS),
+            set(),
+            "配置里有 trigger 没有见证句 —— 补一句到 WITNESS，否则它可能根本不生效",
+        )
+
+    def test_each_trigger_actually_fires(self):
+        for key, sentence in self.WITNESS.items():
+            got, reason = detect(sentence, 0, self.CFG)
+            self.assertTrue(got, f"trigger {key!r} never fires for {sentence!r}")
+            self.assertEqual(reason, f"trigger:{key}", key)
+
+
+class TestBoundaryDoesNotSwallowOtherTriggers(unittest.TestCase):
+    """P0（2026-10-29 红队第二轮）：hard_boundary 曾被放在 detect() 最顶端，
+    短路的不只是 promise，而是**所有**触发。
+
+    1422 条真实回复回放：1.3.5 nudge 28 (1.97%) → 那一版 nudge 16 (1.13%)，
+    少 12 条（6 question_mark / 4 hand_off / 3 offer）。被吞的正是这个 hook
+    存在的理由 —— 只因为尾窗里出现了「发布链路」「未发布」这类**名词**。
+
+    ⇒ hard_boundary 只否掉 promise 这一条路。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+
+    CASES: ClassVar[list[tuple[str, str]]] = [
+        ("要我现在就把这个加固做了吗？顺便说，上次发布很顺利。", "trigger:question_mark"),
+        ("继续干？还是有别的事？发布的事回头说。", "trigger:question_mark"),
+        ("都听你的。另外发布链路上周就修好了。", "trigger:hand_off"),
+        ("要我把这个改造任务布置给赚钱 cron 吗？发布流程我熟。", "trigger:question_mark"),
+        ("要不要我继续优化这块。旧的删除逻辑我已经清空了。", "trigger:offer"),
+    ]
+
+    def test_boundary_word_in_tail_does_not_swallow_nudge(self):
+        for sentence, expected in self.CASES:
+            got, reason = detect(sentence, 0, self.CFG)
+            self.assertTrue(got, f"nudge was swallowed by a boundary noun: {sentence!r}")
+            self.assertEqual(reason, expected, sentence)
+
+
+class TestBoundaryDirection(unittest.TestCase):
+    """hard_boundary 必须两个方向都对，任一边偏就是事故。
+
+    2026-10-29 走过的弯路（三轮红队各纠正一次）：
+      · 让 promise 抢在 boundary 前 ⇒ 「下一步我去付款开通」被 nudge（护栏回退）。
+      · 自造一套 `hard_boundary` 名词表 ⇒ 10 条「边界词作定语」的真承诺被误放行。
+      · 只拿 `hard_boundary` 挡 promise ⇒ 它是 boundary 的真子集，22 条不可逆
+        承诺全被 nudge，14 条是 1.3.5 拦过的。
+    实测 boundary 单独覆盖 19/23，那套 41 行只额外给 2 条 ⇒ 整套删除。
+    ⇒ 现在的判据只有 boundary（1.3.5 那张表）+ 删掉其中「付费」一个名词。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+
+    HARD: ClassVar[list[str]] = [
+        "下一步我去付款开通。",
+        "下一步我要充值 200 元。",
+        "下一步我去把生产库的旧表删掉。",
+        "下一步我去发布到 npm。",
+        "下一步我去部署到生产环境。",
+        "下一步我去 force-push 到 main。",
+        "Next step: I'll deploy to production.",
+        "I'll delete the stale snapshots now.",
+        "下一步就去实名认证。",
+        "下一步我立刻付款。",
+    ]
+
+    REVERSE: ClassVar[list[str]] = [
+        "下一步我去把定价页的文案改一下。",
+        "下一步我去把删除逻辑改成软删。",
+        "下一步我去读一下支付模块的实现。",
+        "下一步我去改一下 main 分支的 README。",
+        "Next step: I'll update the pricing page copy.",
+    ]
+
+    # ⚠ 已知漏检：`boundary` 用「付款」「生产库」「deploy」「发布」这些词做**全局**
+    # 放行，于是含这些词作**定语**的真承诺会被放过。这是 1.3.5 就有的行为，不是
+    # 本次引入的回归；修它要动全局 boundary，会波及 offer / hand_off /
+    # question_mark 全部触发（2026-10-29 已因此造成一次「吞掉 12 条 nudge」）。
+    # ⇒ 取舍「宁可漏检，也不护栏回退」：把现状**钉住**，不假装它是 0。
+    KNOWN_MISSED: ClassVar[list[str]] = [
+        "下一步我去检查生产库的索引大小。",
+        "下一步我去把 deploy 脚本的 typo 修了。",
+        "下一步我去把付款按钮的颜色改成蓝色。",
+        "Next step: I'll review the deploy logs.",
+    ]
+
+    def test_hard_boundaries_are_released(self):
+        """不可逆/对外动作 ⇒ 一律 boundary 放行，不能被 promise 抢走。"""
+        for s in self.HARD:
+            got, reason = detect(s, 0, self.CFG)
+            self.assertFalse(got, f"hard boundary was nudged ({reason}): {s!r}")
+            self.assertEqual(reason, "boundary", s)
+
+    def test_boundary_words_used_as_nouns_do_not_suppress_a_promise(self):
+        """边界词作定语（删除逻辑/支付模块/定价页）⇒ 仍是承诺。"""
+        for s in self.REVERSE:
+            got, reason = detect(s, 0, self.CFG)
+            self.assertTrue(got, f"real promise was released as boundary: {s!r}")
+            self.assertEqual(reason, "trigger:promise", s)
+
+    def test_known_missed_shapes_are_pinned_as_released(self):
+        """已知漏检必须**显式**钉住 —— 否则下轮有人「修好」一条又弄坏另一条。
+
+        这些是「边界词作定语」的真承诺，当前被 boundary 放行。断言它们**现在
+        被放行**，是为了让行为一变测试就红，必须有人明确决定。
+        """
+        for s in self.KNOWN_MISSED:
+            got, reason = detect(s, 0, self.CFG)
+            self.assertFalse(got, f"expected known-missed, but now fires ({reason}): {s!r}")
+            self.assertEqual(reason, "boundary", s)
+
+
+class TestWiringCoverage(unittest.TestCase):
+    """两类「改了配置但没生效」的漏，2026-10-29 红队各抓到一次，都没有测试能抓。
+
+    S2: 只改了 6 个 shell adapter，`hookctl.py` / `__init__.py` / patch-mode
+        三个主力入口还是旧的 `build_nudge(decision.attempt)` —— Hermes 插件
+        和 patch-mode 会把 offer 的文案（"你刚才在问用户问题"）发给 promise 场景。
+    S6: trigger 注册散在 3 处（遍历元组 + 两个独立分支），加第 6 个键会静默 no-op。
+    """
+
+    def test_every_build_nudge_call_passes_the_reason(self):
+        """源码级：任何 build_nudge(...) 调用都必须传 reason。"""
+        import re
+        from pathlib import Path as _P
+
+        root = _P(__file__).resolve().parent.parent
+        offenders = []
+        for f in list(root.rglob("*.py")) + list(root.rglob("*.js")):
+            if any(x in f.parts for x in (".venv", "node_modules", "tests", "patch-mode")):
+                continue
+            src = f.read_text(encoding="utf-8", errors="ignore")
+            for m in re.finditer(r"build_nudge\(([^)]*)\)", src):
+                args = m.group(1)
+                if (
+                    "reason" not in args
+                    and args.strip()
+                    and "def" not in src[max(0, m.start() - 12) : m.start()]
+                ):
+                    offenders.append(f"{f.relative_to(root)}: build_nudge({args})")
+        self.assertEqual(offenders, [], "build_nudge call without reason: " + "; ".join(offenders))
+
+    def test_patch_mode_mirrors_the_reason_plumbing(self):
+        from pathlib import Path as _P
+
+        root = _P(__file__).resolve().parent.parent
+        src = (root / "patch-mode" / "continue_hook.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "build_nudge(decision.attempt, decision.reason)",
+            src,
+            "patch-mode must pass the reason, else it sends the offer text for promises",
+        )
+
+    def test_every_configured_trigger_is_dispatched(self):
+        """配置里有的键，必须都在 DISPATCHED_TRIGGERS 里。"""
+        from detector import DISPATCHED_TRIGGERS
+
+        cfg = default_config()
+        configured = set(cfg["triggers"])
+        self.assertEqual(
+            configured,
+            set(DISPATCHED_TRIGGERS),
+            f"triggers config and dispatch table disagree: only-in-config="
+            f"{configured - set(DISPATCHED_TRIGGERS)}, only-in-dispatch="
+            f"{set(DISPATCHED_TRIGGERS) - configured}",
+        )
 
 
 class TestDetectZh(unittest.TestCase):

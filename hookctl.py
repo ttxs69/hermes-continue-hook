@@ -584,7 +584,7 @@ def _cli(argv: Iterable[str]) -> int:
             try:
                 from detector import build_nudge  # type: ignore[no-redef]
 
-                payload["nudge"] = build_nudge(decision.attempt)
+                payload["nudge"] = build_nudge(decision.attempt, decision.reason)
             except Exception:
                 pass
         print(json.dumps(payload, ensure_ascii=False))

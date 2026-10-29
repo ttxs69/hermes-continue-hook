@@ -38,6 +38,15 @@ fi
 STAGED="$(git diff --cached --name-only --diff-filter=ACMR)"
 
 PY_FILES="$(echo "$STAGED" | grep '\.py$' || true)"
+# ⚠ ruff's `exclude` (pyproject [tool.ruff.format].exclude) only applies when it
+# walks a DIRECTORY. Passing explicit file paths — which is what this hook does —
+# overrides it, so the generated patch-mode/continue_hook.py got format-checked
+# here and failed, while the full gate (which runs `ruff format --check .` over
+# the whole tree, so the exclude applies) passed. That inconsistency meant every commit that touched detector.py was
+# blocked, since regenerating patch mode dirties that file.
+# Keep this list identical to [tool.ruff.format].exclude in pyproject.toml.
+RUFF_FORMAT_EXCLUDE="patch-mode/continue_hook.py"
+PY_FILES="$(echo "$PY_FILES" | grep -vxF "$RUFF_FORMAT_EXCLUDE" || true)"
 JS_FILES="$(echo "$STAGED" | grep -E '\.(js|mjs|ts|json|yml)$' || true)"
 
 if [ -n "${PY_FILES}" ]; then

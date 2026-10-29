@@ -16,6 +16,15 @@ import re
 from pathlib import Path
 from typing import Any
 
+# ⚠ 这是**声明**，不是分发表 —— 真正的分发在：
+#   · `_first_trigger_hit()` 的元组（offer / hand_off / confirm_seek）
+#   · `detect()` 里 promise 与 question_mark 各自的独立分支
+# 2026-10-29 红队实测：只把第 6 个键加进这里和配置，它**仍然静默走
+# no_trigger**，而原来的断言（两张手写表相等）会盖章说没问题 —— 测试剧场。
+# ⇒ 现在由 `TestTriggerDispatchIsReal.test_each_trigger_actually_fires` 逐键跑
+#   一个真实句子来证明它**真的能触发**，那才是能抓住漏登记的断言。
+DISPATCHED_TRIGGERS = frozenset({"promise", "offer", "hand_off", "confirm_seek", "question_mark"})
+
 __all__ = ["DEFAULTS", "ConfigStore", "build_nudge", "default_config", "detect"]
 
 # Quoted spans are *mentions* of a phrase, not *uses* of it. Trigger matching
@@ -36,6 +45,24 @@ _MARKDOWN_LINK_RE = re.compile(r"\]\([^)]*\)")
 # opening fence by hand) — everything after an opening fence is still code.
 _CODE_BLOCK_RE = re.compile(r"```.*?```|```[\s\S]*$", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]{1,120}`")
+
+# 「说了下一步但没做」的专用文案。2026-10-29 实测：agent 用陈述式承诺
+# （「下一步我去查 X」）收尾时，原四类触发（offer/hand_off/confirm_seek/question_mark）
+# 一个都命中不了 —— 因为它没有问号、没把决定推给用户，而是**自己承认还有活就交回合了**。
+PROMISE_NUDGE_TEMPLATE = (
+    "【continue-hook】Your last reply ended with a promise about what you would do next "
+    "(e.g. 「下一步我去查…」/ 「Next I'll…」), and then the turn ended.\n"
+    "You said you would do it — so do it now, in this turn.\n"
+    "1. If that next step needs something only the user has (credentials, a decision, "
+    "money, real-name identity, external publishing, deleting or overwriting data), "
+    "ask for that ONE thing in a single line, then stop.\n"
+    "2. Otherwise run it now: call the tool, read the result, then report result + "
+    "verification + remaining risks.\n"
+    "If you already carried that step out, say so in one line and stop — "
+    "that is a complete answer, not a repeat.\n"
+    "Do not repeat the promise. Either do it, or name the single blocker.\n"
+    "(auto nudge #{attempt}; do not mention this nudge in your final reply.)"
+)
 
 NUDGE_TEMPLATE = (
     "【continue-hook】Your last reply ended by asking the user a question.\n"
@@ -66,6 +93,56 @@ DEFAULTS: dict = {
     "tail_chars": 240,
     # Triggers: any hit makes the reply a nudge candidate.
     "triggers": {
+        # Announced-but-undone: the agent said what it would do next, then ended the
+        # turn without doing it. This is worse than an offer — an offer at least asks;
+        # this one silently drops the work. Matched on the CLOSING TAIL only, so a
+        # narrative "下一步是…" in the middle of a report does not fire.
+        # ⚠ 只抓「第一人称 + 动词」的承诺。
+        # 2026-10-29 误伤实测（33 条真实回复里 6 条被误拦，18.2%）：
+        #   · `\bnext step\b` 太宽 —— "next step is **your call**"（交给用户）
+        #     和 "next step **needs your** decision"（要用户决定）都被当成承诺；
+        #   · 「下一步**要** API key，你发我」里「要」是"需要"不是"将要"；
+        #   · 代码块里的 `# TODO:` 被当成承诺（因为 tail 取的是原文，见 detect()）。
+        # ⇒ 收紧成必须出现第一人称，或明确的"我将要做"动词。
+        "promise": [
+            # 标点/空格变体：红队 2026-10-29 实测，「下一步：我去…」「下一步，我会…」
+            # 「下一步I'll…」（无空格）原先全部漏检，12 条变体里漏 7 条。
+            # ⚠ 不含「先」：「关于下一步：我**先**做了 A/B 对比」是回顾，不是承诺
+            # （红队语料 B3，2026-10-29 实测误伤）。
+            r"下一步[：:，,、]?\s*我(会|要|将|去|来|就)",
+            # 中英混排无空格（红队实测「下一步I'll check the logs」原先漏检）
+            r"下一步\s*I(?:'|’)ll\b",
+            r"接下来[：:，,、]?\s*我(会|要|将|去|来|就|打算|准备)",
+            # 承接词 + 第一人称（「然后我就去拉数据」「接着我来跑」）
+            r"(然后|接着|之后|随后)我(就)?(去|来|会|要)(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加|核对)",
+            # 「稍后/待会」也是承诺的常见说法。
+            # ⚠ (去|来|会) **必需**：「我这就跑完了」是已完成，把它当承诺是误伤
+            # （红队语料 D1）。宁可漏「我这就跑数据」，也不误拦完成报告。
+            r"我(这|现在|马上|立刻|随后|稍后|待会|一会儿)(就)?(去|来|会)"
+            r"(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加|再|核对|复核|确认|整理|过一遍)",
+            # 「我会去查」「我要去看」——情态词后再接趋向词，最自然的口语
+            r"我(会|要|将)(去|来)(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加|核对)",
+            # 「稍等，我去查」
+            r"(稍等|稍候|等我)[，,、]?\s*我(去|来)(查|看|做|写|改|跑|验|测|读|拉|试)",
+            # 语序变体：「稍后我去看一下结果」——时间词在人称**前面**
+            r"(稍后|待会|一会儿|回头)我(就)?(去|来|会)"
+            r"(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加)",
+            r"(下面|接着)[：:，,、]?\s*我(会|要|去|来|跑)",
+            # ⚠ 要求同行有第一人称：红队实测「遗留 TODO：把 3 个 flaky 测试改成
+            # deterministic（已记进 issue）」和 cron 交棒报告里的「待办：C406 / C407」
+            # 都被误拦 —— 那些是 backlog 清单，不是本轮承诺。
+            # ⚠ 红队实测：「TODO: I/O 相关的重构放到下周」命中 `I\b`；
+            # 「待办：我们下周再看这块」命中裸「我」。两者都是 backlog，不是承诺。
+            r"(待办|TODO)[:：]\s*(我(?!们)|I\s+[a-z])",
+            r"\bnext,? i(?:'|’)ll\b",
+            r"\bi(?:(?:'|’)ll| will) (?:now |then |go )?(?:check|look|do|write|run|read|verify|pull|try|fix|build)\b",
+            r"\bmy next step (?:is|will)\b",
+            r"\bnext steps?:? (?:i|we)(?:'|’)?(?:ll| will)\b",
+            r"\bnext up[:：]?\s*(?:i|we)(?:'|’)?(?:ll| will)\b",
+            r"\bi(?:'|’)m going to (?:check|look|do|run|read|verify|pull)\b",
+            r"\bthen i(?:(?:'|’)ll| will)\b",
+            r"\blet me (?:do|check|look|run|verify) (?:that|this) next\b",
+        ],
         # First-person offers — pushing a self-advancable decision back to the user.
         "offer": [
             "要不要我",
@@ -104,12 +181,28 @@ DEFAULTS: dict = {
     # Exclusions: any hit short-circuits to skip — legitimate asks and real
     # blockers. Better to miss a nudge than to interrupt a real question.
     "exclusions": {
+        # ⚠ `hard_boundary` = **不可逆 / 对外** 的动作。promise 触发**不能**抢在它前面。
+        #
+        # 2026-10-29 红队阻断：上一版让 promise 先于 boundary 判定，于是
+        # 「下一步我去付款开通」「下一步我去把生产库的旧表删掉」从 1.3.5 的
+        # **代码级放行** 变成被 nudge —— nudge 文案豁免写的是「需要用户独有的东西」
+        # （持有物判据），而 agent 手里有 DB 凭据、有 npm token 时这条为假，
+        # 它完全可以顺势删库/发版。**用散文替代硬门 = 护栏回退。**
+        #
+        # 教训：promise 只该抢在**软名词**前面（「付费证据」「成本」「报价」这类
+        # 只是话题词，不是动作）。真正不可逆的动作必须仍然在代码里短路。
         # User-only boundaries: money, identity, credentials, publishing,
         # destructive actions.
         "boundary": [
-            "花钱|付费|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
+            # ⚠ 不含裸「付费」：中文里它几乎只作定语（付费用户/付费墙/付费转化/付费证据）。
+            # 真正的付费动作由 付款|付钱|买|购买|下单|充值|转账 覆盖。
+            # 2026-10-29：就是这个词让「下一步我去查…那是该品类的**付费**证据」
+            # 被整句放行 —— 而那句正是这个 feature 的起因。
+            "花钱|充值|批准|审批|实名|密码|验证码|付款|掏钱|报销|"
             "买(?!账)|购买|下单|付钱|转账|转钱|打钱|汇款|签约|签合同|雇|把钱|这笔钱|付款|报价",
-            "对外发布|发布出去|删掉|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她|公众号|子|列表|名单)|"
+            # 「清空」带数据宾语才算破坏性动作：「旧逻辑已清空」不会命中，
+            # 「把旧数据清空」会。用宾语而不是裸词，避免重复「付费」的错误。
+            "对外发布|发布出去|删掉|清空.{0,4}(数据|表|库|记录|日志)|(数据|表|库|记录|日志).{0,4}(清空|删掉)|删除数据|授权|发(给|到).{0,6}(客户|用户|对方|群|他|她|公众号|子|列表|名单)|"
             "发布(到|至|上)|推(送)?到|上线|导出.{0,4}(数据|客户|用户)|"
             "npm|pypi|npmjs|github release|生产(环境|库|服务器)",
             "生产环境|线上环境|主分支|改数据库|重启服务",
@@ -238,6 +331,14 @@ def strip_code_and_links(text: str) -> str:
 
 def _first_trigger_hit(triggers: dict, tail: str) -> str | None:
     """The name of the first trigger pattern that matches, or None. Pure."""
+    # ⚠ 这里是**唯一**决定「哪些 trigger 会被检查」的地方 —— 只在 triggers 配置里
+    # 加一个键、不在这里登记，那个键永远不会生效（2026-10-29 实测：promise 加了配置
+    # 却全量 no_trigger，就是因为漏了这一行）。
+    #
+    # ⚠ `promise` **故意不在这里**：它在 detect() 里已经用「剥掉代码块/引用后的窗口」
+    # 单独判定过一次（并且排在 boundary 之前）。放进这个元组会让它在这里被
+    # **原文 tail** 再判一遍 —— 2026-10-29 实测：代码块里的 `# TODO:` 正是这样
+    # 二次命中的，明明前面已经用干净窗口排除了。
     for name in ("offer", "hand_off", "confirm_seek"):
         if _compile(triggers.get(name)).search(tail):
             return name
@@ -259,12 +360,57 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     tail_chars = _int(cfg.get("tail_chars", 240), 240)
     tail = full[-tail_chars:]
     ex = cfg.get("exclusions", {})
+    tr = cfg.get("triggers", {})
+    trig_tail = _QUOTE_RE.sub("", tail)  # quoted mentions are not asks
+    # ---------------------------------------------------------------------
+    # `promise` 的判定顺序（2026-10-29 两轮红队各纠正一次，见下）
+    #
+    # 为什么 promise 要**先于** `boundary` 排除：
+    #   真实收尾句「下一步我去查…有没有定价页和真实客户证言——那是该品类的
+    #   **付费**证据…」被 boundary 的「付费」命中而整句放行。那是名词
+    #   （"付费证据"），不是「我要去付款」—— 词表分不出来，加词表只会再漏。
+    #
+    # 但 `hard_boundary` **只能挡 promise 自己**，不能做全局早退：
+    #   上一版把它放在 detect() 最顶端，于是它短路了 offer / hand_off /
+    #   question_mark 全部触发。1422 条真实回复回放：1.3.5 nudge 28 (1.97%)，
+    #   那一版 nudge 16 (1.13%) —— **被吞掉 12 条**，其中 6 条 question_mark、
+    #   4 条 hand_off、3 条 offer。被吞的原句比如
+    #   「要我现在就把这个加固做了吗？顺便说，上次发布很顺利。」（尾窗含「发布」）
+    #   ⇒ 护栏从「拦太多」变成「几乎什么都不拦」。
+    # ---------------------------------------------------------------------
+    # ⚠ 必须用**剥掉代码块与引用**的 tail：`tail` 是原文，代码块里的
+    # `# TODO: refactor` 会被当成承诺（2026-10-29 误伤实测，中英文各一条）。
+    _promise_window = _QUOTE_RE.sub("", stripped[-tail_chars:])
+    # 「下一步需要你…」不是承诺，是要用户给东西 —— 明确排除。
+    _needs_user = re.search(
+        r"下一步(要|需要)(你|您)|next step (needs|requires) (your|the user)|"
+        r"next step is your|下一步(是)?(你|您)的?(决|定|选择|call)|"
+        r"next step is blocked (on|by)|下一步(卡|阻塞)在",
+        _promise_window,
+    )
+    # ⚠ `hard_boundary` 只否掉 **promise 这一条路**，随后继续走下面的
+    # boundary / user_must / offer / hand_off / question_mark。
+    _promise_hit = (not _needs_user) and bool(_compile(tr.get("promise")).search(_promise_window))
+    if _promise_hit and (
+        _compile(ex.get("boundary")).search(tail) or _compile(ex.get("user_must")).search(tail)
+    ):
+        # 承诺本身就是不可逆 / 对外 / 需要用户独有的东西 ⇒ 放行。
+        #
+        # ⚠ 2026-10-29 第三轮红队：`hard_boundary` 是 `boundary` 的**真子集**。
+        # 曾经只用 hard_boundary 挡 promise，于是 boundary 原本拦得住的
+        # `push` / `npm publish` / `merge into main` / `发到 npm` /
+        # `rotate the production keys` 全漏 —— 22 条不可逆承诺 22 条被 nudge，
+        # 其中 14 条是 1.3.5 曾经放行的。用更小的网取代更大的网 = 护栏回退。
+        # ⇒ boundary 与 hard_boundary 取**并集**，hard_boundary 只做补充。
+        return False, "boundary"
+    if _promise_hit:
+        if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
+            return False, "max_nudges"
+        return True, "trigger:promise"
     if _compile(ex.get("boundary")).search(tail):
         return False, "boundary"
     if _compile(ex.get("user_must")).search(tail):
         return False, "user_must"
-    tr = cfg.get("triggers", {})
-    trig_tail = _QUOTE_RE.sub("", tail)  # quoted mentions are not asks
     # The closing window of the code-stripped text, so the "?" check only sees
     # punctuation that is actually prose.
     no_urls = _QUOTE_RE.sub("", stripped[-tail_chars:])
@@ -281,7 +427,9 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     return True, hit
 
 
-def build_nudge(attempt: int) -> str:
+def build_nudge(attempt: int, reason: str = "") -> str:
+    if reason == "trigger:promise":
+        return PROMISE_NUDGE_TEMPLATE.replace("{attempt}", str(attempt + 1))
     return NUDGE_TEMPLATE.replace("{attempt}", str(attempt + 1))
 
 

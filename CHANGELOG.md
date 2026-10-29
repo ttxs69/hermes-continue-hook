@@ -1,5 +1,140 @@
 # Changelog
 
+## 1.4.0 (2026-10-29)
+
+A fifth trigger class: **announced-but-undone**.
+
+### The gap
+Every existing trigger fires when the agent pushes a decision back to the user —
+`offer` (要不要我…), `hand_off` (交给你定), `confirm_seek` (这样可以吗), or a
+closing question mark. None fires when the agent says what it *will do next* and
+then ends the turn. That reply asks for nothing and carries no question mark, so
+the step it just described is silently dropped.
+
+The incident that started this: asked what came next, the agent ended a reply
+with 「下一步我去查 Replume 有没有定价页和真实客户证言」 and stopped. It never ran.
+
+### `triggers.promise`
+Matches a **first-person** announced next step, in the closing tail only.
+Requiring a first person is the whole point — a bare `\bnext step\b` also fired
+on "next step is **your call**" and "the next step **needs your** decision",
+both of which hand the decision back to the user, the opposite of this trigger's
+purpose. Punctuation and spacing variants (「下一步：我去…」「下一步，我会…」
+「下一步I'll…」「稍后我去…」) and English forms (`Next I'll`, `Next up: I'll`,
+`My next step is`) are covered.
+
+### Where the boundary sits — and where it must not sit
+`exclusions.hard_boundary` covers irreversible and outward-facing actions:
+paying, deleting or overwriting, publishing, deploying, force-pushing, rotating
+keys, real-name identity. Two separate mistakes were made and fixed here, both
+caught by review rather than by the author:
+
+**1. The boundary had become prose.** An earlier version let `promise` run ahead
+of `boundary` and relied on the nudge text to say "ask first if you need
+something only the user has". That is a *possession* test, not an
+*irreversibility* test — an agent holding DB credentials and an npm token
+satisfies it trivially. 「下一步我去付款开通」 and 「下一步我去把生产库的旧表删掉」
+went from code-level releases in 1.3.5 to nudges. The boundary is back in code.
+
+**2. Then it was too wide — and then in the wrong place.** Keying
+`hard_boundary` on boundary *nouns* released seven genuine promises that merely
+mentioned one (「下一步我去看一下**发布**日志」「下一步我去把**删除**逻辑改成软删」
+「下一步我去把 **deploy** 脚本的 typo 修了」「下一步我去把**付款**按钮的颜色改成蓝色」).
+It now keys on **position**: the boundary word must follow a modal or directional
+verb (去/要/会/将/就/马上/立刻/现在/这就/直接), or form an explicit destructive
+structure (把X删掉, drop table, force-push). English requires first-person future
+("I'll deploy"), not a bare verb anywhere in the sentence.
+
+At one point the check also sat at the top of `detect()` and short-circuited
+**every** trigger rather than just `promise`. Replaying real turn-final replies:
+that version went *below* 1.3.5 — it ate nudges that 1.3.5 had produced, purely
+because the tail window contained 「发布链路」 or 「未发布」. It now only vetoes the
+promise path; the rest of the chain (offer / hand_off / confirm_seek /
+question_mark) runs unchanged.
+
+### Wiring
+`build_nudge(attempt, reason)` gives a promise its own text. An earlier pass
+wired only the six shell adapters, leaving `hookctl.py`, `__init__.py` and the
+patch-mode generator on the old one-argument signature — the Hermes plugin would
+have sent the *offer* text ("your last reply ended by asking the user a
+question") for a promise. `TestWiringCoverage` scans the source tree for
+`build_nudge` calls that omit the reason.
+
+`promise` is judged in exactly one place, on the code-stripped window.
+Registering it in `_first_trigger_hit`'s tuple as well caused a second judgement
+on the raw tail, which is how a fenced `# TODO:` block fired.
+
+`DISPATCHED_TRIGGERS` is a **declaration, not a dispatch table** — the real
+dispatch is the `_first_trigger_hit` tuple plus two branches inside `detect()`,
+and adding a sixth key there does *not* make it fire. The test that used to
+assert "the two hand-written tables are equal" was theatre: it stayed green
+while a new key silently fell through to `no_trigger`. It is replaced by
+`TestTriggerDispatchIsReal`, which runs one real sentence per configured key and
+asserts it actually fires.
+
+### Measured
+False positives are measured on two corpora, because the author's own corpus was
+written while fixing the bug and therefore flatters the fix.
+
+**Real traffic** — 2291 turn-final replies replayed from the local session store:
+
+| | nudges |
+|---|---|
+| 1.3.5 (`aa55822`) | 110 (4.80%) |
+| this version | 114 (4.98%) |
+| **delta** | **+4, 0 lost** |
+
+All four new hits were read by hand and are genuine dropped promises — including
+the incident sentence itself and one 「接下来我会…**我马上动，你不用回**」 that
+then ended the turn.
+
+**Recall on a 15-sentence variant corpus** (punctuation, word order, mixed
+Chinese/English): **10/15 = 67%**. The five misses are deliberate:
+
+- 「我待会再看一下」— the time word is followed by 再+verb with no 去/来/会.
+  Covering it would also fire on 「我待会再说」, which is a real hand-off.
+- 「我先去把数据拉下来」— 「把 X」 separates the verb.
+- 「先去查一下日志」— no first person at all. Without one, a plan-shaped
+  sentence in a report fires.
+- 「Next: verify the numbers」— English variant.
+- 「回头我去核对」— word-order variant not in the time-word alternation.
+
+This is the honest limit of a pattern-based trigger: each miss covered adds a
+false positive somewhere else. 67% recall with 0 false positives on a 21-item
+negatives set is the chosen point. A semantic classifier would do better; a
+word list cannot.
+
+**Hard boundary coverage is measured in both directions**
+(`TestHardBoundaryDirection`):
+
+- 11 hard boundaries must be released — including `push to npm`,
+  `npm publish`, `merge into main`, `rotate the production keys`,
+  `付款开通`, `删库`, `deploy`, `实名`, and `需要你先把 API key 给我`
+  (`user_must`).
+- 5 promises that merely *mention* a boundary noun must still fire.
+- 4 shapes are pinned as **known misses** — a promise whose boundary word
+  appears as a modifier (「**生产库**的索引大小」「**deploy** 脚本的 typo」
+  「**付款**按钮的颜色」「review the **deploy** logs」). These are released
+  because fixing them means loosening the global `boundary` list, which affects
+  every trigger class. Pinned, not hidden.
+
+**The boundary is a union, not a replacement.** `promise` is vetoed by
+`boundary` **or** `hard_boundary` **or** `user_must`. An earlier pass used only
+`hard_boundary`, which is a strict subset — and 22 adversarial irreversible
+promises then all got nudged, 14 of which 1.3.5 had released. A narrower net
+replacing a wider one is a guardrail regression even when it looks tidier.
+
+**Cost per false positive** is one extra agent turn, capped by
+`max_nudges_per_turn: 2`. A reply matching both promise and hand_off nudges once.
+
+### Note on an already-carried-out promise
+Not word-listed. A first-person 「下一步我去查了，已经查完了」 still fires. The
+nudge text offers the exit ("if you already carried that step out, say so in one
+line"), and the trade is bounded: one extra turn, after which the chain closes
+because the follow-up carries no promise.
+
+338 tests pass.
+
 ## 1.3.5 (2026-10-29)
 
 Three more fixes the independent red team found on 1.3.4.
