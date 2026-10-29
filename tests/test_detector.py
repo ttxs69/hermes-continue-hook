@@ -65,9 +65,26 @@ class TestPromise(unittest.TestCase):
         """boundary 里的「付费」会被「付费证据」这个名词误命中 ⇒ promise 先判。"""
         self.case("下一步我去看它的付费数据。", True, "noun must not mask a promise")
 
-    def test_promise_touching_a_real_boundary_still_nudges(self):
-        """承诺本身触及边界 ⇒ 仍然 nudge；文案第 1 条会让它只问那一件事。"""
-        self.case("下一步我要付款开通，需要你批准。", True, "boundary promise still nudges")
+    def test_promise_touching_a_hard_boundary_is_released(self):
+        """⚠ 红线：承诺本身是**不可逆/对外**动作 ⇒ 必须放行，不能 nudge。
+
+        2026-10-29 红队阻断项 S1：上一版让 promise 抢在 boundary 之前，
+        于是「下一步我去付款开通」「下一步我去把生产库的旧表删掉」从 1.3.5 的
+        代码级放行变成被 nudge。那份 nudge 文案的豁免写的是「需要用户独有的东西」
+        （持有物判据），而 agent 手里有 DB 凭据、有 npm token 时这条为假 ——
+        它完全可以顺势删库/发版。**用散文替代硬门 = 护栏回退。**
+        """
+        for s in (
+            "下一步我要付款开通，需要你批准。",
+            "下一步我去把生产库的旧表删掉。",
+            "下一步我会发布到 npm。",
+            "下一步我去部署到生产环境。",
+            "Next step: I'll deploy to production and rotate the keys.",
+            "I'll delete the stale snapshots now.",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertFalse(got, f"hard boundary must be released, got {reason}: {s!r}")
+            self.assertEqual(reason, "boundary", s)
 
     def test_real_blocker_is_not_a_promise(self):
         """真的需要用户提供东西 ⇒ 不 nudge（这里是 boundary/user_must 的活）。"""
@@ -136,6 +153,15 @@ class TestPromiseFalsePositiveBudget(unittest.TestCase):
         "下一步当时是把目录复制过去，已经做完了。",
         "I will note that the run took 3 minutes. It did.",
         "我说过下一步去查定价，查完了：没有公开定价页。",
+        # ── 以下来自独立红队的**预注册**语料（2026-10-29），作者自己的语料里没有这些形态 ──
+        "Build green. My next step is blocked on the DNS record only you can add",
+        "检查完了：注册流程下一步会跳到实名页，不是 bug",
+        "剩下的是你的活。待办：1. 审批这个 PR",
+        "遗留 TODO：把 3 个 flaky 测试改成 deterministic（已记进 issue #41）",
+        "Shipped. Next, I'd suggest a different approach - that's your call",
+        "All 41 classified. Next step: the taxonomy needs your sign-off",
+        "待办：C406 / C407 交棒给下一轮",
+        "下一步是等 CI 跑完，不过已经跑过了，全绿",
     ]
 
     def test_false_positive_rate_is_within_budget(self):
@@ -172,6 +198,22 @@ class TestPromiseFalsePositiveBudget(unittest.TestCase):
             "promise must be judged only in detect(), on the code-stripped window",
         )
 
+    def test_recall_of_punctuation_and_mixed_forms(self):
+        """红队实测：12 条变体里原先漏 7 条 —— 标点与混排必须召回。"""
+        for s in (
+            "下一步：我去查定价页。",
+            "下一步，我会验证这个假设。",
+            "接下来，我会先跑测试。",
+            "下一步 I'll check their pricing page.",
+            "我稍后去查一下。",
+            "下面我跑一下测试。",
+            "Next up: I'll audit the logs.",
+            "Next steps: I'll verify and report.",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertTrue(got, f"missed a punctuation/mixed form: {s!r}")
+            self.assertEqual(reason, "trigger:promise", s)
+
     def test_recall_is_intact(self):
         """收紧正则不能把真承诺漏掉。"""
         for s in (
@@ -182,11 +224,66 @@ class TestPromiseFalsePositiveBudget(unittest.TestCase):
             "Next I'll check their pricing page.",
             "I will run the verification now.",
             "My next step is to audit the logs.",
-            "下一步会补齐测试。",
         ):
             got, reason = detect(s, 0, self.CFG)
             self.assertTrue(got, f"missed a real promise: {s!r}")
             self.assertEqual(reason, "trigger:promise")
+
+
+class TestWiringCoverage(unittest.TestCase):
+    """两类「改了配置但没生效」的漏，2026-10-29 红队各抓到一次，都没有测试能抓。
+
+    S2: 只改了 6 个 shell adapter，`hookctl.py` / `__init__.py` / patch-mode
+        三个主力入口还是旧的 `build_nudge(decision.attempt)` —— Hermes 插件
+        和 patch-mode 会把 offer 的文案（"你刚才在问用户问题"）发给 promise 场景。
+    S6: trigger 注册散在 3 处（遍历元组 + 两个独立分支），加第 6 个键会静默 no-op。
+    """
+
+    def test_every_build_nudge_call_passes_the_reason(self):
+        """源码级：任何 build_nudge(...) 调用都必须传 reason。"""
+        import re
+        from pathlib import Path as _P
+
+        root = _P(__file__).resolve().parent.parent
+        offenders = []
+        for f in list(root.rglob("*.py")) + list(root.rglob("*.js")):
+            if any(x in f.parts for x in (".venv", "node_modules", "tests", "patch-mode")):
+                continue
+            src = f.read_text(encoding="utf-8", errors="ignore")
+            for m in re.finditer(r"build_nudge\(([^)]*)\)", src):
+                args = m.group(1)
+                if (
+                    "reason" not in args
+                    and args.strip()
+                    and "def" not in src[max(0, m.start() - 12) : m.start()]
+                ):
+                    offenders.append(f"{f.relative_to(root)}: build_nudge({args})")
+        self.assertEqual(offenders, [], "build_nudge call without reason: " + "; ".join(offenders))
+
+    def test_patch_mode_mirrors_the_reason_plumbing(self):
+        from pathlib import Path as _P
+
+        root = _P(__file__).resolve().parent.parent
+        src = (root / "patch-mode" / "continue_hook.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "build_nudge(decision.attempt, decision.reason)",
+            src,
+            "patch-mode must pass the reason, else it sends the offer text for promises",
+        )
+
+    def test_every_configured_trigger_is_dispatched(self):
+        """配置里有的键，必须都在 DISPATCHED_TRIGGERS 里。"""
+        from detector import DISPATCHED_TRIGGERS
+
+        cfg = default_config()
+        configured = set(cfg["triggers"])
+        self.assertEqual(
+            configured,
+            set(DISPATCHED_TRIGGERS),
+            f"triggers config and dispatch table disagree: only-in-config="
+            f"{configured - set(DISPATCHED_TRIGGERS)}, only-in-dispatch="
+            f"{set(DISPATCHED_TRIGGERS) - configured}",
+        )
 
 
 class TestDetectZh(unittest.TestCase):

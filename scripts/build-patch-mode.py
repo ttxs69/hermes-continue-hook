@@ -108,7 +108,7 @@ def continue_hook_nudge(agent, final_response) -> str | None:
         if not decision.should_nudge:
             return None
         agent._continue_hook_nudges = attempt + 1
-        return build_nudge(decision.attempt)
+        return build_nudge(decision.attempt, decision.reason)
     except Exception:
         return None
 '''

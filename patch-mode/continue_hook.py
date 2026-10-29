@@ -23,6 +23,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+# ⚠ 所有会被真正判定的 trigger 键，**集中声明在这一处**。
+# 2026-10-29 红队 S6：注册逻辑原来散在 3 个地方（元组 + 两个独立分支），
+# 加第 6 个键仍会静默走 no_trigger。测试断言 set(triggers) == DISPATCHED，
+# 任何一边漏了都会红。
+DISPATCHED_TRIGGERS = frozenset({"promise", "offer", "hand_off", "confirm_seek", "question_mark"})
+
 __all__ = ["DEFAULTS", "ConfigStore", "build_nudge", "default_config", "detect"]
 
 # Quoted spans are *mentions* of a phrase, not *uses* of it. Trigger matching
@@ -103,16 +109,28 @@ DEFAULTS: dict = {
         #   · 代码块里的 `# TODO:` 被当成承诺（因为 tail 取的是原文，见 detect()）。
         # ⇒ 收紧成必须出现第一人称，或明确的"我将要做"动词。
         "promise": [
-            r"下一步我(会|要|将|去|来|就|先)",
-            r"下一步(会|将|去|来)(?!要你)",
-            r"接下来我(会|要|将|去|来|就|先)",
-            r"我(这|现在|马上|立刻|随后)(就)?(去|来)(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加)",
-            r"(下面|接着)我(会|要|去|来)",
-            r"(待办|TODO)[:：]",
+            # 标点/空格变体：红队 2026-10-29 实测，「下一步：我去…」「下一步，我会…」
+            # 「下一步I'll…」（无空格）原先全部漏检，12 条变体里漏 7 条。
+            # ⚠ 不含「先」：「关于下一步：我**先**做了 A/B 对比」是回顾，不是承诺
+            # （红队语料 B3，2026-10-29 实测误伤）。
+            r"下一步[：:，,、]?\s*我(会|要|将|去|来|就)",
+            r"接下来[：:，,、]?\s*我(会|要|将|去|来|就)",
+            # 「稍后/待会」也是承诺的常见说法。
+            # ⚠ (去|来|会) **必需**：「我这就跑完了」是已完成，把它当承诺是误伤
+            # （红队语料 D1）。宁可漏「我这就跑数据」，也不误拦完成报告。
+            r"我(这|现在|马上|立刻|随后|稍后|待会|一会儿)(就)?(去|来|会)"
+            r"(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加)",
+            r"(下面|接着)[：:，,、]?\s*我(会|要|去|来|跑)",
+            # ⚠ 要求同行有第一人称：红队实测「遗留 TODO：把 3 个 flaky 测试改成
+            # deterministic（已记进 issue）」和 cron 交棒报告里的「待办：C406 / C407」
+            # 都被误拦 —— 那些是 backlog 清单，不是本轮承诺。
+            r"(待办|TODO)[:：]\s*(我|I\b)",
             r"\bnext,? i(?:'|’)ll\b",
             r"\bi(?:(?:'|’)ll| will) (?:now |then |go )?(?:check|look|do|write|run|read|verify|pull|try|fix|build)\b",
             r"\bmy next step (?:is|will)\b",
-            r"\bnext step:? (?:i|we)(?:'|’)?(?:ll| will)\b",
+            r"\bnext steps?:? (?:i|we)(?:'|’)?(?:ll| will)\b",
+            r"\bnext up[:：]?\s*(?:i|we)(?:'|’)?(?:ll| will)\b",
+            r"\bi(?:'|’)m going to (?:check|look|do|run|read|verify|pull)\b",
             r"\bthen i(?:(?:'|’)ll| will)\b",
             r"\blet me (?:do|check|look|run|verify) (?:that|this) next\b",
         ],
@@ -154,6 +172,30 @@ DEFAULTS: dict = {
     # Exclusions: any hit short-circuits to skip — legitimate asks and real
     # blockers. Better to miss a nudge than to interrupt a real question.
     "exclusions": {
+        # ⚠ `hard_boundary` = **不可逆 / 对外** 的动作。promise 触发**不能**抢在它前面。
+        #
+        # 2026-10-29 红队阻断：上一版让 promise 先于 boundary 判定，于是
+        # 「下一步我去付款开通」「下一步我去把生产库的旧表删掉」从 1.3.5 的
+        # **代码级放行** 变成被 nudge —— nudge 文案豁免写的是「需要用户独有的东西」
+        # （持有物判据），而 agent 手里有 DB 凭据、有 npm token 时这条为假，
+        # 它完全可以顺势删库/发版。**用散文替代硬门 = 护栏回退。**
+        #
+        # 教训：promise 只该抢在**软名词**前面（「付费证据」「成本」「报价」这类
+        # 只是话题词，不是动作）。真正不可逆的动作必须仍然在代码里短路。
+        "hard_boundary": [
+            r"(付款|支付|充值|下单|购买|转账|打钱|汇款|签约|签合同)",
+            r"(删除|删掉|覆盖|清空|格式化|drop\s+table|truncate)",
+            r"(发布|上线|部署|push|force-push|npm\s+publish|pip\s+upload|deploy|release)",
+            r"(生产库|生产环境|线上环境|主分支|main\s+branch|production|prod\b)",
+            r"(实名|认证|授权|签约|开票)",
+            # ⚠ `pay attention` / `pay close attention` 不是付款 —— 词表必误伤，
+            # 2026-10-29 实测：原有回归测试「Should I pay attention to the lint
+            # warnings?」被 hard_boundary 的 `\bpay\b` 放行，属真回归。
+            r"\bpay(?!\s+(?:close\s+)?att(?:ention|n))\b(?!\s+(?:heed|tribute))\b"
+            r"|\b(purchase|checkout|subscribe|upgrade to (?:pro|paid|premium))\b",
+            r"\b(delete|drop|truncate|overwrite|wipe|rm\s+-rf)\b",
+            r"\b(publish|deploy|release|force[- ]push)\b",
+        ],
         # User-only boundaries: money, identity, credentials, publishing,
         # destructive actions.
         "boundary": [
@@ -330,9 +372,14 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     # 「下一步需要你…」不是承诺，是要用户给东西 —— 明确排除。
     _needs_user = re.search(
         r"下一步(要|需要)(你|您)|next step (needs|requires) (your|the user)|"
-        r"next step is your|下一步(是)?(你|您)的?(决|定|选择|call)",
+        r"next step is your|下一步(是)?(你|您)的?(决|定|选择|call)|"
+        r"next step is blocked (on|by)|下一步(卡|阻塞)在",
         _promise_window,
     )
+    # ⚠ 顺序：hard_boundary 必须先短路，promise 才能判。
+    # 理由见 exclusions.hard_boundary 的注释（2026-10-29 红队阻断项 S1）。
+    if _compile(ex.get("hard_boundary")).search(tail):
+        return False, "boundary"
     if not _needs_user and _compile(tr.get("promise")).search(_promise_window):
         if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
             return False, "max_nudges"
@@ -869,6 +916,6 @@ def continue_hook_nudge(agent, final_response) -> str | None:
         if not decision.should_nudge:
             return None
         agent._continue_hook_nudges = attempt + 1
-        return build_nudge(decision.attempt)
+        return build_nudge(decision.attempt, decision.reason)
     except Exception:
         return None

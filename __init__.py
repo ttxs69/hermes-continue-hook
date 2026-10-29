@@ -172,7 +172,7 @@ def _on_turn_end(
         decision = decide(text, session_id=sid, host="hermes", platform=str(platform or ""))
         if not decision.should_nudge:
             return
-        nudge = build_nudge(decision.attempt)
+        nudge = build_nudge(decision.attempt, decision.reason)
         # Injection contract (hermes_cli/plugins_injection.py):
         #  * CLI / TUI / desktop — no target; the message goes to the local
         #    input queue and the agent continues.
