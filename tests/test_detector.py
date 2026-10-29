@@ -18,6 +18,77 @@ from detector import (
 )
 
 
+class TestPromise(unittest.TestCase):
+    """陈述式承诺：「下一步我去 X」然后交回合。
+
+    2026-10-29 实测事故：agent 在回复末尾写「下一步我去查 Replume 有没有定价页」，
+    然后直接结束了回合 —— 四类原有触发（offer / hand_off / confirm_seek /
+    question_mark）**一个都没命中**，因为它既没有问号、也没把决定推给用户，
+    而是自己承认还有活，却把回合交了。这是 continue-hook 要防的事的**子集**，
+    但原来完全漏检。
+    """
+
+    CFG = default_config()
+
+    def case(self, text, expect, note=""):
+        got, reason = detect(text, 0, self.CFG)
+        self.assertEqual(got, expect, f"{note} {text!r} -> {reason}")
+        return reason
+
+    def test_the_actual_incident(self):
+        """真实原句：含「付费证据」这个名词，不能让 boundary 放行。"""
+        reason = self.case(
+            "下一步我去查 Replume 有没有定价页和真实客户证言"
+            "——那是该品类的付费证据，也是我唯一还能从这次撞车拿到的东西。",
+            True,
+            "the incident that motivated this class",
+        )
+        self.assertEqual(reason, "trigger:promise")
+
+    def test_short_promise(self):
+        self.case("下一步我去查 Replume 定价。", True)
+
+    def test_colloquial_variants(self):
+        for s in ("接下来我会验证这个假设。", "我这就去拉数据。", "下面我会先跑一遍测试。"):
+            self.case(s, True, "colloquial promise")
+
+    def test_english_promise(self):
+        for s in (
+            "Next I'll check their pricing page.",
+            "I will run the verification now.",
+            "Then I'll pull the numbers.",
+        ):
+            self.case(s, True, "english promise")
+
+    def test_promise_beats_boundary_noun(self):
+        """boundary 里的「付费」会被「付费证据」这个名词误命中 ⇒ promise 先判。"""
+        self.case("下一步我去看它的付费数据。", True, "noun must not mask a promise")
+
+    def test_promise_touching_a_real_boundary_still_nudges(self):
+        """承诺本身触及边界 ⇒ 仍然 nudge；文案第 1 条会让它只问那一件事。"""
+        self.case("下一步我要付款开通，需要你批准。", True, "boundary promise still nudges")
+
+    def test_real_blocker_is_not_a_promise(self):
+        """真的需要用户提供东西 ⇒ 不 nudge（这里是 boundary/user_must 的活）。"""
+        self.case("下一步需要你提供 API key，我没有凭据。", False, "genuine blocker")
+
+    def test_narrative_next_step_does_not_fire(self):
+        """正文里叙述「下一步是…」且已完成 ⇒ 不该拦。"""
+        self.case("这个方案下一步是把它部署到 staging，我已经部署完了。", False)
+
+    def test_finished_report_does_not_fire(self):
+        self.case("本次排查完成：读了 41 条标题，分类统计如下。结论已写进 GOAL.md R296。", False)
+        self.case("报告写完了。整个流程：collect → render → publish，三步都跑通了。", False)
+
+    def test_promise_nudge_text_is_specific(self):
+        """promise 有自己的文案：说明「你说了要做，现在就做」。"""
+        txt = build_nudge(0, "trigger:promise")
+        self.assertIn("promise about what you would do next", txt)
+        self.assertIn("do it now", txt)
+        # offer 的文案不能串到 promise 上
+        self.assertNotIn("ended by asking the user a question", txt)
+
+
 class TestDetectZh(unittest.TestCase):
     CFG = default_config()
 

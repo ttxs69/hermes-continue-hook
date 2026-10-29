@@ -41,7 +41,7 @@ except ImportError:  # flat execution (repo layout, tests, npm package)
     from detector import ConfigStore, build_nudge, detect  # type: ignore[no-redef]
     from hookctl import decide  # type: ignore[no-redef]
 
-__version__ = "1.3.5"
+__version__ = "1.4.0"
 
 
 def cfg_path() -> Path:

@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.4.0 (2026-10-29)
+
+A new trigger class: **announced-but-undone**.
+
+- **The gap:** every existing trigger fires when the agent pushes a decision back
+  to the user — an offer (`要不要我…`), a hand-off (`交给你定`), a confirmation
+  (`这样可以吗`), or any closing question mark. None of them fires when the agent
+  says what it *will do next* and then ends the turn. That reply has no question
+  mark and asks for nothing; it silently drops the work.
+
+- **The incident:** asked what came next, the agent ended a reply with
+  「下一步我去查 Replume 有没有定价页和真实客户证言」 and stopped. The task it had
+  just described never ran. Live, this is the exact behaviour the hook exists to
+  prevent, and it was going undetected.
+
+- **`triggers.promise`** matches an announced next step in the **closing tail
+  only** — a narrative 「下一步是…」 in the middle of a report does not fire, and a
+  promise that was already carried out (`…我已经部署完了`) does not either.
+  Chinese and English forms are both covered.
+
+- **`promise` is evaluated before the boundary exclusions.** The real closing
+  sentence above contains 「付费**证据**」 — a noun — and `boundary`'s 「付费」
+  matched it, releasing the whole reply. Word lists cannot tell a noun from an
+  intent, and adding words only moves the hole. A stated next step is not a
+  question being asked, so it is judged first; the promise nudge's first clause
+  already covers the boundary case ("if that step needs something only the user
+  has, ask for that one thing and stop").
+
+- **`build_nudge(attempt, reason)`** takes the reason, so a promise gets its own
+  text ("you said you would do it — do it now") instead of the offer text.
+
+- `_first_trigger_hit` now names `promise` in its dispatch tuple. Adding a key to
+  `triggers` without naming it there is a silent no-op — that is how the first
+  version of this change produced `no_trigger` on every test case.
+
+- 10 new tests in `TestPromise` (including the live incident sentence verbatim,
+  the noun-collision case, and both regression directions). 325 tests pass.
+
 ## 1.3.5 (2026-10-29)
 
 Three more fixes the independent red team found on 1.3.4.

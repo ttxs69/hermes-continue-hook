@@ -37,6 +37,22 @@ _MARKDOWN_LINK_RE = re.compile(r"\]\([^)]*\)")
 _CODE_BLOCK_RE = re.compile(r"```.*?```|```[\s\S]*$", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]{1,120}`")
 
+# 「说了下一步但没做」的专用文案。2026-10-29 实测：agent 用陈述式承诺
+# （「下一步我去查 X」）收尾时，原四类触发（offer/hand_off/confirm_seek/question_mark）
+# 一个都命中不了 —— 因为它没有问号、没把决定推给用户，而是**自己承认还有活就交回合了**。
+PROMISE_NUDGE_TEMPLATE = (
+    "【continue-hook】Your last reply ended with a promise about what you would do next "
+    "(e.g. 「下一步我去查…」/ 「Next I'll…」), and then the turn ended.\n"
+    "You said you would do it — so do it now, in this turn.\n"
+    "1. If that next step needs something only the user has (credentials, a decision, "
+    "money, real-name identity, external publishing, deleting or overwriting data), "
+    "ask for that ONE thing in a single line, then stop.\n"
+    "2. Otherwise run it now: call the tool, read the result, then report result + "
+    "verification + remaining risks.\n"
+    "Do not repeat the promise. Either do it, or name the single blocker.\n"
+    "(auto nudge #{attempt}; do not mention this nudge in your final reply.)"
+)
+
 NUDGE_TEMPLATE = (
     "【continue-hook】Your last reply ended by asking the user a question.\n"
     "Self-check once, per standing discipline:\n"
@@ -66,6 +82,22 @@ DEFAULTS: dict = {
     "tail_chars": 240,
     # Triggers: any hit makes the reply a nudge candidate.
     "triggers": {
+        # Announced-but-undone: the agent said what it would do next, then ended the
+        # turn without doing it. This is worse than an offer — an offer at least asks;
+        # this one silently drops the work. Matched on the CLOSING TAIL only, so a
+        # narrative "下一步是…" in the middle of a report does not fire.
+        "promise": [
+            r"下一步(我)?(会|要|去|来|就|先)",
+            r"接下来(我)?(会|要|去|来|就|先)",
+            r"我(这|现在|马上|立刻|随后)(就)?(去|来)(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加)",
+            r"(下面|接着)(我)?(会|要|去|来)",
+            r"(待办|TODO)[:：]",
+            r"\bnext,? i(?:'|’)ll\b",
+            r"\bi(?:(?:'|’)ll| will) (?:now |then |go )?(?:check|look|do|write|run|read|verify|pull|try|fix|build)\b",
+            r"\bnext step\b",
+            r"\bthen i(?:(?:'|’)ll| will)\b",
+            r"\blet me (?:do|check|look|run|verify) (?:that|this) next\b",
+        ],
         # First-person offers — pushing a self-advancable decision back to the user.
         "offer": [
             "要不要我",
@@ -238,7 +270,11 @@ def strip_code_and_links(text: str) -> str:
 
 def _first_trigger_hit(triggers: dict, tail: str) -> str | None:
     """The name of the first trigger pattern that matches, or None. Pure."""
-    for name in ("offer", "hand_off", "confirm_seek"):
+    # ⚠ 这里是**唯一**决定「哪些 trigger 会被检查」的地方 —— 只在 triggers 配置里
+    # 加一个键、不在这里登记，那个键永远不会生效（2026-10-29 实测：promise 加了配置
+    # 却全量 no_trigger，就是因为漏了这一行）。
+    # 顺序即优先级：promise 放最前 —— 「说了要做却不做」比「问用户要不要」更严重。
+    for name in ("promise", "offer", "hand_off", "confirm_seek"):
         if _compile(triggers.get(name)).search(tail):
             return name
     return None
@@ -259,12 +295,28 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     tail_chars = _int(cfg.get("tail_chars", 240), 240)
     tail = full[-tail_chars:]
     ex = cfg.get("exclusions", {})
+    tr = cfg.get("triggers", {})
+    trig_tail = _QUOTE_RE.sub("", tail)  # quoted mentions are not asks
+    # ---------------------------------------------------------------------
+    # `promise` is checked BEFORE the boundary exclusions, on purpose.
+    #
+    # 2026-10-29 实测：真实收尾句「下一步我去查…有没有定价页和真实客户证言——
+    # 那是该品类的**付费**证据…」被 boundary 的「付费」命中而整句放行。
+    # 那是名词（"付费证据"），不是「我要去付款」—— 词表分不出来，加词表只会再漏。
+    #
+    # 优先级理由：boundary 存在的目的是「别打断用户真正的提问」；
+    # 而 promise 是「agent 自己说要去做，却没做就结束回合」—— 它不是提问。
+    # 即使那一步真的触及边界，PROMISE_NUDGE_TEMPLATE 的第 1 条已经写明
+    # 「若需要用户独有的东西，就用一句话问那一件事然后停」⇒ 分支仍然安全。
+    # ---------------------------------------------------------------------
+    if _compile(tr.get("promise")).search(trig_tail):
+        if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
+            return False, "max_nudges"
+        return True, "trigger:promise"
     if _compile(ex.get("boundary")).search(tail):
         return False, "boundary"
     if _compile(ex.get("user_must")).search(tail):
         return False, "user_must"
-    tr = cfg.get("triggers", {})
-    trig_tail = _QUOTE_RE.sub("", tail)  # quoted mentions are not asks
     # The closing window of the code-stripped text, so the "?" check only sees
     # punctuation that is actually prose.
     no_urls = _QUOTE_RE.sub("", stripped[-tail_chars:])
@@ -281,7 +333,9 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     return True, hit
 
 
-def build_nudge(attempt: int) -> str:
+def build_nudge(attempt: int, reason: str = "") -> str:
+    if reason == "trigger:promise":
+        return PROMISE_NUDGE_TEMPLATE.replace("{attempt}", str(attempt + 1))
     return NUDGE_TEMPLATE.replace("{attempt}", str(attempt + 1))
 
 

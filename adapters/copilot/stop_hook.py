@@ -62,7 +62,9 @@ def main() -> None:
 
     from detector import build_nudge
 
-    _common.print_json({"decision": "block", "reason": build_nudge(decision.attempt)})
+    _common.print_json(
+        {"decision": "block", "reason": build_nudge(decision.attempt, decision.reason)}
+    )
 
 
 if __name__ == "__main__":
