@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.3.4 (2026-10-29)
+
+- **The README told people to run a command that does not exist.**
+  Two lines said `npx hermes-continue-hook check` / `npx hermes-continue-hook
+  uninstall --host all` — the *unscoped* name. The package is published under
+  the scope `@ttxs69/hermes-continue-hook`, and the unscoped name has never
+  existed on the registry (`GET /hermes-continue-hook` → 404). Anyone who
+  followed the install section hit a 404 on their first command. Both READMEs
+  now use the scoped name.
+
+- **The npm-version requirement is now checked where it matters.**
+  1.3.3 moved the requirement out of `engines` (it belongs to the release
+  toolchain, not to everyone who installs the package) and left it in a
+  comment in `publish.yml`, with a test asserting the comment still contained
+  the string "11.15.0". That test could not fail for the reason it existed:
+  comments get rewritten, and no npm version was ever compared to anything.
+
+  `publish.yml` now compares the running npm against the floor it needs
+  (`sort -V`, so 11.9.0 is correctly read as older than 11.15.0) and fails
+  the job if it is too old. The unit test no longer pretends to check a
+  comment; it checks that the publish workflow still runs
+  `npm stage publish`, and that `.nvmrc` pins a node whose bundled npm is
+  new enough.
+
+  That last check used to be "node major >= 24", which was wrong twice over:
+  node 24.0.0 ships npm 11.3.0 (too old), and **every** node 25.x ships npm
+  ≤ 11.12.1 (too old, because the odd-numbered line carries an older npm).
+  The floor is now node 24.18.0 (npm 11.16.0) or node 26.3.0, derived from
+  nodejs.org's own release metadata.
+
+- **The release workflow's shell blocks are now syntax-checked.**
+  While adding the check above, one `echo` lost its closing quote. YAML
+  parsed it fine, prettier passed it, and every existing test was green —
+  but bash would have failed at publish time, after the tag was already
+  pushed. A new test feeds every `run:` block in every workflow to `bash -n`,
+  and the test that does so also proves it fails on an unclosed quote.
 ## 1.3.3 (2026-10-29)
 
 - **`engines` no longer requires a specific npm version.**
