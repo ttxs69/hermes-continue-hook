@@ -176,18 +176,34 @@ DEFAULTS: dict = {
         # 教训：promise 只该抢在**软名词**前面（「付费证据」「成本」「报价」这类
         # 只是话题词，不是动作）。真正不可逆的动作必须仍然在代码里短路。
         "hard_boundary": [
-            r"(付款|支付|充值|下单|购买|转账|打钱|汇款|签约|签合同)",
-            r"(删除|删掉|覆盖|清空|格式化|drop\s+table|truncate)",
-            r"(发布|上线|部署|push|force-push|npm\s+publish|pip\s+upload|deploy|release)",
-            r"(生产库|生产环境|线上环境|主分支|main\s+branch|production|prod\b)",
-            r"(实名|认证|授权|签约|开票)",
-            # ⚠ `pay attention` / `pay close attention` 不是付款 —— 词表必误伤，
-            # 2026-10-29 实测：原有回归测试「Should I pay attention to the lint
-            # warnings?」被 hard_boundary 的 `\bpay\b` 放行，属真回归。
-            r"\bpay(?!\s+(?:close\s+)?att(?:ention|n))\b(?!\s+(?:heed|tribute))\b"
-            r"|\b(purchase|checkout|subscribe|upgrade to (?:pro|paid|premium))\b",
-            r"\b(delete|drop|truncate|overwrite|wipe|rm\s+-rf)\b",
-            r"\b(publish|deploy|release|force[- ]push)\b",
+            # ⚠ 判据是「**动作**不可逆」，不是「**提到**不可逆名词」。
+            #
+            # 2026-10-29 自测：第一版用名词表，10 条反向攻击里 7 条被**误放行** ——
+            #   「下一步我去看一下**发布**日志」（看日志，不是发布）
+            #   「下一步我去把**删除**逻辑改成软删」（改代码，不是删数据）
+            #   「下一步我去读一下**支付**模块的实现」
+            #   「下一步我去检查**生产库**的索引大小」
+            #   「下一步我去把 **deploy** 脚本的 typo 修了」
+            #   「下一步我去把**付款**按钮的颜色改成蓝色」
+            # 这些全是真承诺，却被当边界放行了 —— 等于把该拦的漏掉。
+            #
+            # 中文词性难判，所以用**位置**：边界词必须紧跟情态/趋向动词
+            # （去/要/会/将/就/马上/立刻/现在/这就/直接），否则它是定语不是动作。
+            r"(去|要|会|将|就|马上|立刻|现在|这就|直接)\s*"
+            r"(付款|支付|充值|下单|购买|转账|打钱|汇款|签约|签合同|删掉|清空|覆盖|"
+            r"发布|上线|部署|实名|认证)",
+            # 目标 + 完成体动作（「把 X 删掉」这类明确结构）。
+            # ⚠ 不収裸「删除」——「把**删除**逻辑改成软删」里的「删除」是名词。
+            r"把.{0,20}(删掉|删了|清空|清掉了|覆盖掉)",
+            r"(drop\s+table|truncate\s+table|rm\s+-rf)",
+            r"(生产库|生产环境|线上环境|主表|旧表).{0,12}(改|写|删|清|换)",
+            # 英文：必须是第一人称将来时 + 不可逆动词，不是 "the deploy logs"。
+            # ⚠ `pay attention` 不是付款 —— 2026-10-29 实测：原有回归测试
+            # 「Should I pay attention to the lint warnings?」被 `\bpay\b` 放行。
+            r"\b(?:i(?:'|’)ll|i will)\s+(?:now\s+|go\s+)?"
+            r"(?:pay(?!\s+(?:close\s+)?att(?:ention|n))|purchase|checkout|subscribe|"
+            r"delete|drop|truncate|overwrite|wipe|publish|deploy|release|force[- ]push)\b",
+            r"\bforce[- ]push\b",
         ],
         # User-only boundaries: money, identity, credentials, publishing,
         # destructive actions.

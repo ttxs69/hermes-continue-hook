@@ -230,6 +230,63 @@ class TestPromiseFalsePositiveBudget(unittest.TestCase):
             self.assertEqual(reason, "trigger:promise")
 
 
+class TestHardBoundaryDirection(unittest.TestCase):
+    """hard_boundary 必须两个方向都对，任一边偏就是事故。
+
+    2026-10-29 两次实测：
+      · 第一版让 promise 抢在 boundary 前 ⇒ 「下一步我去付款开通」被 nudge
+        （护栏回退，红队 S1 阻断）。
+      · 第二版用名词表做 hard_boundary ⇒ 10 条反向攻击里 7 条被**误放行**：
+        「下一步我去看一下发布日志」「下一步我去读一下支付模块的实现」
+        「下一步我去把 deploy 脚本的 typo 修了」「下一步我去把付款按钮的颜色改成蓝色」
+        全是真承诺，却被当边界漏掉。
+    ⇒ 两个方向都钉在这里。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+
+    HARD: ClassVar[list[str]] = [
+        "下一步我去付款开通。",
+        "下一步我要充值 200 元。",
+        "下一步我去把生产库的旧表删掉。",
+        "下一步我去把旧数据清空。",
+        "下一步我去发布到 npm。",
+        "下一步我去部署到生产环境。",
+        "下一步我去 force-push 到 main。",
+        "Next step: I'll deploy to production.",
+        "I'll delete the stale snapshots now.",
+        "下一步就去实名认证。",
+        "下一步我立刻付款。",
+    ]
+
+    REVERSE: ClassVar[list[str]] = [
+        "下一步我去把定价页的文案改一下。",
+        "下一步我去看一下发布日志。",
+        "下一步我去把删除逻辑改成软删。",
+        "下一步我去读一下支付模块的实现。",
+        "下一步我去检查生产库的索引大小。",
+        "下一步我去改一下 main 分支的 README。",
+        "下一步我去把 deploy 脚本的 typo 修了。",
+        "Next step: I'll review the deploy logs.",
+        "Next step: I'll update the pricing page copy.",
+        "下一步我去把付款按钮的颜色改成蓝色。",
+    ]
+
+    def test_hard_boundaries_are_released(self):
+        """不可逆/对外动作 ⇒ 一律 boundary 放行，不能被 promise 抢走。"""
+        for s in self.HARD:
+            got, reason = detect(s, 0, self.CFG)
+            self.assertFalse(got, f"hard boundary was nudged ({reason}): {s!r}")
+            self.assertEqual(reason, "boundary", s)
+
+    def test_boundary_words_used_as_nouns_do_not_suppress_a_promise(self):
+        """边界词作定语（发布日志/删除逻辑/支付模块/付款按钮）⇒ 仍是承诺。"""
+        for s in self.REVERSE:
+            got, reason = detect(s, 0, self.CFG)
+            self.assertTrue(got, f"real promise was released as boundary: {s!r}")
+            self.assertEqual(reason, "trigger:promise", s)
+
+
 class TestWiringCoverage(unittest.TestCase):
     """两类「改了配置但没生效」的漏，2026-10-29 红队各抓到一次，都没有测试能抓。
 
