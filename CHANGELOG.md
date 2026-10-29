@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.5 (2026-10-29)
+
+Three more fixes the independent red team found on 1.3.4.
+
+- **The node-version check had a hole of its own.**
+  1.3.4 checked that `.nvmrc` pinned a node *at or above* 24.18.0, but that
+  comparison is not monotone across node majors: node 26.0.0–26.2.0 sort
+  above 24.18.0 and still ship npm 11.12.1 / 11.13.0, which is short of the
+  11.15.0 that `npm stage publish` needs. The check is now a **whitelist of
+  ranges** whose members all ship a new enough npm — 24.18.0 → 24.x and
+  26.3.0 → 26.x — and node 25.x is absent because every 25.x release ships
+  npm ≤ 11.12.1. An unknown major (node 27, say) is **rejected** until
+  somebody checks what npm it ships and adds the range.
+
+- **The negative control was a tautology.**
+  `tests/test_engines.py` had a "negative control" that re-implemented the
+  rule against a hard-coded dictionary instead of calling the real one — so
+  deleting the real gate, or inverting its assertion, left the negative
+  control green. The rule now lives in one function (`engines_problems()`)
+  that both the gate and the negative control call, and a separate test
+  asserts the gate itself still exists (without it, nothing reads the real
+  package.json any more).
+
+- **The README's host table was missing one host.**
+  `--host skills` is accepted by the CLI and does something real (it writes
+  `SKILL.md` + `AGENTS.md` — the rule, not a forced turn), but it was absent
+  from the host-by-host table in both READMEs.
 ## 1.3.4 (2026-10-29)
 
 - **The README told people to run a command that does not exist.**
