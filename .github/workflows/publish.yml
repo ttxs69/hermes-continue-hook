@@ -141,9 +141,19 @@ jobs:
         run: npm pack --dry-run
       - name: Check the npm that ships with this node
         run: |
-          # Node 24 ships npm 11.19.x, which already satisfies both npm
-          # requirements for this workflow: trusted publishing needs 11.5.1+
-          # and `npm stage publish` needs 11.15.0+.
+          # The npm requirement has to be CHECKED, not just written down.
+          #
+          # The requirement used to live only in this comment, and a unit test
+          # asserted that the comment still contained the string "11.15.0".
+          # That is a gate that cannot fail for the reason it exists:
+          # comments get rewritten, and the actual npm version was never
+          # compared against anything. (The independent red team on
+          # 2026-10-29 pointed this out, and it was right.)
+          #
+          # So the check happens here, where the publish actually runs, and it
+          # compares the running npm against the floor it needs:
+          #   trusted publishing (OIDC)  needs npm 11.5.1+
+          #   `npm stage publish`        needs npm 11.15.0+
           #
           # There used to be a global npm upgrade to the newest release here.
           # It was unnecessary and it was also the reason this workflow behaved
@@ -157,6 +167,14 @@ jobs:
           # So: no upgrade. One node version, one npm, everywhere.
           node --version
           npm --version
+          NPM_VER="$(npm --version)"
+          # Compare with sort -V so 11.9.0 is correctly seen as older than 11.15.0.
+          if [ "$(printf '%s\n' 11.15.0 "$NPM_VER" | sort -V | head -1)" != "11.15.0" ]; then
+            echo "::error::npm $NPM_VER is older than 11.15.0, which 'npm stage publish' requires."
+            echo "::error::.nvmrc pins a node whose bundled npm is too old — pick a newer node."
+            exit 1
+          fi
+          echo "npm $NPM_VER satisfies the 11.15.0 floor for npm stage publish."
       - name: Dry run
         if: ${{ inputs.dry-run }}
         run: npm publish --dry-run --access public --registry=https://registry.npmjs.org/

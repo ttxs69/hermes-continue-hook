@@ -281,8 +281,8 @@ comparable across all of them.
 ```bash
 npx @ttxs69/hermes-continue-hook install --host all      # every host on this machine
 npx @ttxs69/hermes-continue-hook install --host claude-code
-npx hermes-continue-hook check                    # what is installed
-npx hermes-continue-hook uninstall --host all     # remove (keeps your other hooks)
+npx @ttxs69/hermes-continue-hook check                    # what is installed
+npx @ttxs69/hermes-continue-hook uninstall --host all     # remove (keeps your other hooks)
 ```
 
 Or from a clone:

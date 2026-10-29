@@ -194,15 +194,36 @@ class TestToolchainIsPinned(unittest.TestCase):
             "staging 是免 2FA 的那条发布路径，它没了就没有无人值守的发布。",
         )
 
-        # ② node 主版本必须够新（npm 11 随 node 24 发布）
+        # ② 钉的 node 版本必须自带够新的 npm
+        # ⚠ 判据是**实测的版本映射**，不是「主版本够高就行」——
+        # 2026-10-29 独立红队实测推翻了「node 主版本 >= 24」这条：
+        #   node 24.0.0 → npm 11.3.0   < 11.15.0  ❌（同主版本里就不够）
+        #   node 25.9.0 → npm 11.12.1  < 11.15.0  ❌（**整个 25.x 都不够**，npm 反而更旧）
+        #   node 24.18.0 → npm 11.16.0  ✅ 第一个够用的 node 24
+        #   node 26.3.0  → npm 11.16.0  ✅ 第一个够用的 node 26
+        # 数据来自 nodejs.org/dist/index.json（每个发行版自带哪个 npm 是官方元数据）。
         pinned = (REPO / ".nvmrc").read_text(encoding="utf-8").strip()
-        major = int(pinned.split(".")[0])
+        m = re.match(r"^(\d+)\.(\d+)\.(\d+)$", pinned)
+        self.assertIsNotNone(m, f".nvmrc 的版本格式不可解析: {pinned!r}")
+        node = tuple(int(x) for x in m.groups())
+
+        # 整个 node 25.x 都带不够新的 npm（实测最高 11.12.1）
+        self.assertNotEqual(
+            node[0],
+            25,
+            f".nvmrc 钉的是 node {pinned}。node 25.x 整版都不满足发布要求："
+            "实测 node 25.9.0 自带 npm 11.12.1 < 11.15.0（`npm stage publish` 需要 11.15.0+）。"
+            "请改用 node 24.18.0+ 或 node 26.3.0+。",
+        )
+
+        # 够用的下界：node 24.18.0（npm 11.16.0）、node 26.3.0（npm 11.16.0）
+        floor = (24, 18, 0)
         self.assertGreaterEqual(
-            major,
-            24,
+            node,
+            floor,
             f".nvmrc 钉的是 node {pinned}。npm 11（trusted publishing 需 11.5.1+、"
-            "`npm stage publish` 需 11.15.0+）只随 node 24 发布：实测 node 22.23.2 "
-            "带的是 npm 10.9.8，node 24.22.1 才是 11.19.1。",
+            "`npm stage publish` 需 11.15.0+）最早出现在 node 24.18.0（自带 npm 11.16.0）；"
+            "node 24.0.0 自带的是 11.3.0，不够。",
         )
 
     def test_no_workflow_upgrades_npm(self) -> None:
