@@ -13,8 +13,28 @@
 2. **该红不红（假绿）**：只读回执文本 + mtime，**从不读 GIF** ⇒ 把 GIF 换成 0 字节、
    或换回上一轮的 GIF（帧里印着旧 sha），再手写回执，它照样打印 ✅。
 
-⇒ **证据必须长在产物里**：sha 写进 GIF 的 comment extension 块
-（`tools/embed_gif_sha.py`）。手写文本这条路不存在；换 GIF 就换掉了证据。
+⇒ 修法：sha 写进 GIF 的 comment extension 块（`tools/embed_gif_sha.py`），
+  门用 PIL 读 `info['comment']`，剥旧块用**真正的块解析器**（不是逐字节找 `21 FE`）。
+
+## ⚠⚠ 这道门的**真实强度上限**（红队第六轮要求我说清楚，不许自欺）
+
+它是**流程门，不是存证门**。它证明的命题只有一条：
+
+> 「有人把这 16 个字符写进了这个 GIF 的 comment 块。」
+
+它**不**证明「GIF 的画面是用当前语料录的」。实测反例（红队做的，我复现过）：
+
+- 拿上一轮的 GIF（帧里印着旧 sha），**不重录**，只跑 `embed_gif_sha.py` ⇒ **exit 0**
+- 连仓库工具都不用：`python3 -c` 手工插 20 字节 ⇒ 同样 **exit 0**
+- 用 PIL 造一个 8×8 单帧黑图，嵌上 sha ⇒ **exit 0**
+
+⇒ 它能可靠拦住的，是**两个自然故障**（这两个是真正会发生的事）：
+  ① GIF 被清空 / 截断 / 换成别的东西 ⇒ 读不出 comment ⇒ 红
+  ② 改了语料但忘了重录 GIF ⇒ 帧里印的 sha 与语料不符 ⇒ 红
+
+⇒ 它**拦不住**：有人主动跑一下 embed 去「补」证据。要真正做实，得把渲染器 / OCR
+  闸进仓库（代价大得多）。**当前选择是「拦住意外，不拦故意」**，并用一条纪律兜底：
+  **改语料的同一次提交里必须重录 GIF**，而不是在发布前补一个 comment。
 
     python3 scripts/check_published_sha.py
     python3 scripts/check_published_sha.py --allow-missing   # 发布物还没生成（本地开发）
@@ -108,7 +128,7 @@ def main() -> int:
         for b in bad:
             print("   -", b)
         return 78
-    print(f"✅ 发布物 sha 与语料一致（{sha}）")
+    print(f"✅ GIF 的 comment 与语料 sha 一致（{sha}）—— 流程门，不证明画面是用当前语料录的")
     return 0
 
 
