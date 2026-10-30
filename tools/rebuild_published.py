@@ -223,12 +223,17 @@ def write_placeholder_block(block: str) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="重建全部发布物（语料 + 文档数字 + PROVENANCE）")
-    ap.add_argument("--raw", type=Path, required=True, help="原始（未脱敏）语料")
+    # ⚠ 红队第十二轮：`--check` **不需要**原始语料（它只比生成器指纹 + 发布语料 sha），
+    #   而原始语料是私有数据**不在仓里** ⇒ `required=True` 让这道门**无法进 CI**
+    #   （CI 里裸跑会 exit 2）。⇒ 只有重建时才要求 --raw。
+    ap.add_argument("--raw", type=Path, help="原始（未脱敏）语料；--check 时不需要")
     ap.add_argument("--check", action="store_true", help="只校验，不写")
     args = ap.parse_args()
 
+    if args.raw is None and not args.check:
+        ap.error("重建需要 --raw（原始语料）；只校验时不用")
     gen_sha = sha16(GENERATOR)
-    raw_sha = sha16(args.raw)
+    raw_sha = sha16(args.raw) if args.raw else None
 
     if args.check:
         prov = json.loads(PROVENANCE.read_text(encoding="utf-8")) if PROVENANCE.exists() else {}

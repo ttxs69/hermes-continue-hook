@@ -10,7 +10,11 @@
 **根因**：文档里的数字全是**手抄**的。改了代码忘了改文档 ⇒ 没人发现。
 
 ⇒ 这道门把「文档里出现的、可识别的数字模式」逐个抓出来，
-  与代码实跑的值比对。**抓不到模式 = 报红**（说明有新写法逃出去了）。
+  与代码实跑的值比对。
+
+⚠ **诚实边界（红队第十二轮指出）**：本门**做不到**「抓不到模式就报红」——
+  它只能校验写进 `PATTERNS` 的那些写法；**没登记的模式（覆盖率、语料条数、
+  英文 `9 adapters`、表格里的数字）它完全看不见**。别把它当"文档全对"的证明。
 
     python3 tools/check_docs_consistency.py
 """
@@ -82,6 +86,9 @@ def rule_counts() -> dict:
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("sc", ROOT / "tools" / "sanitize_corpus.py")
+    # mypy: spec_from_file_location 的返回类型是 Optional ⇒ 显式断言，
+    # 顺便在路径写错时给出明确报错（而不是 NoneType 堆栈）。
+    assert spec is not None and spec.loader is not None, "取不到 sanitize_corpus.py"
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return {
@@ -95,7 +102,9 @@ def rule_counts() -> dict:
 #   每条：(正则, 取值函数, 说明)  —— 正则必须**只匹配该事实**，
 #   否则会误伤别的数字。匹配到但值对不上 ⇒ 报红。
 PATTERNS = [
-    (r"\b(\d+) tests?\b", lambda: test_count(), "测试数"),
+    # ⚠ 「N tests」**不在**这里：它必须按套件分派，见 check_test_counts()。
+    #   红队第十二轮 B2：原来一条 `\b(\d+) tests?\b` 把 vitest 的 74 和
+    #   unittest 的 356 当成同一个事实 ⇒ 门**拒绝真值**、**锁死错数**。
     (r"(\d+) 个 enforce 宿主", lambda: host_facts()["enforce_hosts"], "enforce 宿主数"),
     (r"(\d+) 个 adapter", lambda: host_facts()["adapters"], "adapter 数"),
     (r"(\d+) 份(?: detector|规则|实现)", lambda: host_facts()["implementation_copies"], "实现份数"),
@@ -106,7 +115,7 @@ PATTERNS = [
 ]
 
 
-def check_numbers(facts: dict) -> list[str]:
+def check_numbers(facts: dict) -> tuple[list[str], int]:
     """数字类事实：测试数 / 宿主数 / 规则数 / 白名单项数 ……"""
     bad = []
     checked = 0
@@ -128,6 +137,41 @@ def check_numbers(facts: dict) -> list[str]:
     return bad, checked
 
 
+def check_test_counts(rel: str, text: str) -> tuple[list[str], int]:
+    """「N tests」按**同一行里的命令**分派到对应套件。
+
+    判据（红队第十二轮 B2 后）：
+    | 这一行含 | 期望值 |
+    |---|---|
+    | `unittest` / `pytest` | python 套件实跑数 |
+    | `vitest` / `npm test` | **不许写绝对条数** —— CI 里跑不了 node 套件，
+    |                       写死就是"发布一个无法校验的数"⇒ 报红 |
+    | 都没有 | 歧义 ⇒ 报红（让它写清是哪个套件） |
+    """
+    bad, checked = [], 0
+    py = test_count()
+    for ln_no, line in enumerate(text.splitlines(), 1):
+        if not re.search(r"\d+\s*tests?\b", line, re.I):
+            continue
+        low = line.lower()
+        if "vitest" in low or "npm test" in low or "npm run test" in low:
+            bad.append(
+                f"{rel}:{ln_no} node 套件的条数**不许写死**（CI 里无法校验）："
+                f"「{line.strip()[:70]}」 ⇒ 改成「条数以 npm test 输出为准」"
+            )
+            continue
+        if "unittest" in low or "pytest" in low:
+            for m in re.finditer(r"(\d+)\s*tests?\b", line, re.I):
+                checked += 1
+                if int(m.group(1)) != py:
+                    bad.append(f"{rel}:{ln_no} python 套件写的是 {m.group(1)}，实跑是 {py}")
+            continue
+        bad.append(
+            f"{rel}:{ln_no} 写了测试数但看不出是哪个套件（歧义即红）：「{line.strip()[:70]}」"
+        )
+    return bad, checked
+
+
 def check_shas(facts: dict) -> list[str]:
     """语料 sha 的引用必须等于当前语料。"""
     bad = []
@@ -144,11 +188,20 @@ def check_shas(facts: dict) -> list[str]:
 
 
 def _current_section(rel: str, text: str) -> str:
-    """CHANGELOG 只看**最新一节**（历史版本的旧数字是该留的历史，不是错）。"""
+    """CHANGELOG 只看**最新一节**（历史版本的旧数字是该留的历史，不是错）。
+
+    ⚠ 红队第十二轮抓到：原来用 `rfind` ⇒ 取到的是**最后一个** `## ` 段 =
+      **最旧**那一节（CHANGELOG 是倒序，最新在上）⇒ 最新一节里的错数
+      和悬空 sha 全被豁免，门看到的是"历史上某一版"。
+      ⇒ 用 `find` 取第一节，并截到下一节之前。
+    """
     if rel != "CHANGELOG.md":
         return text
-    idx = text.rfind("\n## ")
-    return text[idx:] if idx > 0 else text
+    start = text.find("\n## ")
+    if start < 0:
+        return text
+    nxt = text.find("\n## ", start + 1)
+    return text[start:nxt] if nxt > 0 else text[start:]
 
 
 def main() -> int:
@@ -161,6 +214,13 @@ def main() -> int:
     print("实跑事实：", json.dumps(facts, ensure_ascii=False))
 
     bad, checked = check_numbers(facts)
+    for rel in DOCS:
+        f = ROOT / rel
+        if not f.exists():
+            continue
+        _b, _c = check_test_counts(rel, _current_section(rel, f.read_text(encoding="utf-8")))
+        bad += _b
+        checked += _c
     bad += check_shas(facts)
     print(f"\n检查了 {checked} 处数字 + 全部 sha 引用")
     if bad:

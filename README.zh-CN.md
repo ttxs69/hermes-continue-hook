@@ -364,7 +364,7 @@ python3 scripts/verify_claims.py     # 交叉核对三个脚本
 
 ```bash
 python3 -m unittest discover -s tests   # 356 tests: detector, plugin, 9 adapters, dsh/pi contracts
-npx vitest run                          # 356 tests: OpenCode plugin, installer, lifecycle invariants, dsh
+npx vitest run                          # node 套件（条数以 npm test 输出为准）: OpenCode plugin, installer, lifecycle invariants, dsh
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
 
@@ -490,7 +490,7 @@ bug——一个并不存在的属性、一个被当 `Error` 读的 `unknown` 错
 ```bash
 python -m unittest discover -s tests     # 356 tests, no dependencies
 python -m pytest --cov                   # same suite + coverage floor
-npx vitest run --coverage                # 356 tests + coverage floor
+npx vitest run --coverage                # node 套件 + 覆盖率下限（条数以输出为准）
 npx eslint . && npx prettier --check '**/*.{js,mjs,ts,json,yml}'
 npx tsc -p tsconfig.json && npx tsc -p tsconfig.checkjs.json
 ```

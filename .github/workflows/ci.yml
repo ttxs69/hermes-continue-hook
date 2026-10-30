@@ -205,6 +205,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # ⚠⚠ 红队第十二轮 B1：这一步**必须有**。
+      #   `tests/test_published_sha_gate.py` 在**模块级** `from PIL import Image`，
+      #   而这个 job 原来一个 `pip install` 都没有 ⇒ 该文件 ImportError
+      #   ⇒ 整套只跑出 **347** 个测试（真值 356）
+      #   ⇒ `check_docs_consistency.py` 把文档里的 356 判成「实跑是 347」⇒ **CI 必红**。
+      #   ⇒ 依赖清单：只有 Pillow 一个第三方包（其余 import 都是仓内模块或 mock）。
+      - name: Install test dependencies (Pillow for the GIF gate test)
+        run: python3 -m pip install --disable-pip-version-check pillow
       - name: Redaction rules still hold (self-test)
         run: python3 tools/sanitize_corpus.py --self-test
       - name: The published corpus has no residue (29 classes + dropped-rows = 30)
@@ -216,6 +224,11 @@ jobs:
           # 真正的覆盖率检查需要**原始语料**（不在仓里，不能进公开仓）。
           # CI 只能保证工具本身能跑、登记表结构正确。
           python3 tools/coverage_check.py --self-test
+      # ⚠⚠ 第十轮/第十一轮/第十二轮**连续三轮**都说这道门没接线 ——
+      #   它校验「文档里的 sha / 生成块 == 生成器当前产出」，
+      #   不接进来 ⇒ 生成器改了、文档没重建，CI 全绿。
+      - name: Published artifacts are reproducible (docs + GIF == generator output)
+        run: python3 tools/rebuild_published.py --check
       - name: Every documented number matches what the code actually does
         run: python3 tools/check_docs_consistency.py
       - name: The allowlist and the redaction rules agree

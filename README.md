@@ -399,7 +399,7 @@ bug would never have surfaced.
 
 ```bash
 python3 -m unittest discover -s tests   # 356 tests: detector, plugin, 9 adapters, dsh/pi contracts
-npx vitest run                          # 356 tests: OpenCode plugin, installer, lifecycle invariants, dsh
+npx vitest run                          # node 套件（条数以 npm test 输出为准）: OpenCode plugin, installer, lifecycle invariants, dsh
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
 
@@ -544,7 +544,7 @@ would be churn, not hygiene.
 ```bash
 python -m unittest discover -s tests     # 356 tests, no dependencies
 python -m pytest --cov                   # same suite + coverage floor
-npx vitest run --coverage                # 356 tests + coverage floor
+npx vitest run --coverage                # node 套件 + 覆盖率下限（条数以输出为准）
 npx eslint . && npx prettier --check '**/*.{js,mjs,ts,json,yml}'
 npx tsc -p tsconfig.json && npx tsc -p tsconfig.checkjs.json
 ```
