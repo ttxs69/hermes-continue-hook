@@ -80,19 +80,6 @@ The hook was, in practice, mostly switched off.
 | E5 | `demo1-replay.sh` 读私有 scratch 路径、讲已撤回的旧口径、与 `demo-all.sh` 数字打架 | **撤下**（`demo-all.sh` 已覆盖全部内容，且用仓内脱敏语料） |
 | E6 | 口径更正只在工作区，GitHub 上仍是旧的 510/33/43 | 与其它产物**同一个 commit** |
 
-**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `8792cf49cb8c4f5c`）**：
-
-| | before | after |
-|---|---|---|
-| released early by `boundary` | **466 (34.8%)** | **0** |
-| actually nudged | 29 | **39** (+10 recovered) |
-
-**真正的误放行 = 10 条（0.7%）**，不是 466 条 —— 其余 456 条两版都放行
-（本来就没有触发信号，**不算误判**）。
-
-⇒ 删表的价值**不是**「多抓了 10 条」，是 **466 条回复的放行理由**
-从「命中了词表」变成「没有触发信号」。
-
 **⚠ 三个脚本现在互为交叉验证**：`replay_real.py` / `replay_regression.py` /
 `verify_claims.py` 各自独立实现，`verify_claims.py` 会比对三者的每一个数并
 打印语料 sha256 —— **任一不一致就 exit 78**。
@@ -619,13 +606,13 @@ Multi-agent support, modelled on the per-harness manifest pattern used by
 - Tests: 16 dsh contract + detector-CLI tests.
 
 <!-- BEGIN GENERATED: metrics -->
-**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `3c1d78a78d692631`）**：
+**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `3d7ec5ed6e7b2953`）**：
 
 | | before | after |
 |---|---|---|
-| released early by `boundary` | **404 (30.1%)** | **0** |
-| actually nudged | 30 | **39** (+9 recovered) |
+| released early by `boundary` | **461 (34.4%)** | **0** |
+| actually nudged | 29 | **39** (+10 recovered) |
 
-**真正的误放行 = 9 条（0.7%）**，不是 404 条 ——
-其余 395 条两版都放行（本来就没有触发信号，**不算误判**）。
+**真正的误放行 = 10 条（0.7%）**，不是 461 条 ——
+其余 451 条两版都放行（本来就没有触发信号，**不算误判**）。
 <!-- END GENERATED: metrics -->

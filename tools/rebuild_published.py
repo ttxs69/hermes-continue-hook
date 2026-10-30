@@ -103,6 +103,40 @@ def placeholder_table() -> str:
     return "\n".join(lines)
 
 
+def assert_no_duplicate_metrics() -> list[str]:
+    """**生成块之外不许再出现「当前口径」**（红队第十轮 B1 的直接修法）。
+
+    上一版 CHANGELOG 里有两份互斥的「⇒ 当前口径」：
+    `:83` 手写的（旧 sha `8792cf49…` + 466/456/10，那批语料已不存在）
+    和 `:621` 生成块（`3c1d78a…` + 404/395/9）。
+    `check_docs()` 的 ARTIFACTS **显式排除 CHANGELOG** ⇒ 没有任何门看得见。
+    """
+    # ⚠ 两个文件用的是**不同的**标记（CHANGELOG 是 metrics，README 是 placeholders）
+    #   —— 我上一版用 metrics 标记去切 README 的块，切了个空 ⇒ 把块**内**的表当成块外 ⇒
+    #   恒定误报。这是「检查器的判据没对上」的又一个同类。
+    marks = {
+        CHANGELOG: (BEGIN, END),
+        FIX_README: (
+            "<!-- BEGIN GENERATED: placeholders -->",
+            "<!-- END GENERATED: placeholders -->",
+        ),
+    }
+    bad = []
+    for path, (b, e) in marks.items():
+        if not path.exists():
+            continue
+        t = path.read_text(encoding="utf-8")
+        outside = t
+        if b in t and e in t:
+            i, j = t.index(b), t.index(e) + len(e)
+            outside = t[:i] + t[j:]
+        if "当前口径" in outside:
+            bad.append(f"{path.name} 的生成块**之外**还有「当前口径」字样 ⇒ 手工块没删干净")
+        if "占位符 | 次数" in outside:
+            bad.append(f"{path.name} 的生成块之外还有一张「占位符 | 次数」表")
+    return bad
+
+
 def metrics_block(sha: str, n: int, m: dict) -> str:
     return f"""{BEGIN}
 **⇒ 当前口径（脱敏 + 剔行后，语料 {n} 条，sha256[:16] = `{sha}`）**：
@@ -118,13 +152,24 @@ def metrics_block(sha: str, n: int, m: dict) -> str:
 
 
 def replace_block(path: Path, block: str) -> bool:
-    """把 path 里 BEGIN…END 之间的内容换成 block。没有标记就追加到末尾。"""
+    """把 path 里 BEGIN…END 之间的内容换成 block。
+
+    ⚠⚠ **没有标记就报错，绝不追加**（红队第十轮的核心发现）：
+      上一版在缺标记时 `else: 追加到末尾` ⇒ 我删掉 CHANGELOG 里的 BEGIN 之后重跑，
+      **同名章节从 2 个变 3 个**，而三道门全绿 —— 因为
+      `check_docs()` 的 ARTIFACTS **显式排除了 CHANGELOG**，
+      于是「两份互斥的『⇒ 当前口径』」就这样活下来了。
+      ⇒ 标记缺失是**结构性错误**（有人删了它），必须停下来。
+    """
     t = path.read_text(encoding="utf-8")
-    if BEGIN in t and END in t:
-        i, j = t.index(BEGIN), t.index(END) + len(END)
-        new = t[:i] + block + t[j:]
-    else:
-        new = t.rstrip() + "\n\n" + block + "\n"
+    n_begin, n_end = t.count(BEGIN), t.count(END)
+    if n_begin != 1 or n_end != 1:
+        raise SystemExit(
+            f"❌ {path.name} 里生成标记不唯一（BEGIN×{n_begin} / END×{n_end}）"
+            f" ⇒ 手工删/复制了标记块？请先修好再跑。"
+        )
+    i, j = t.index(BEGIN), t.index(END) + len(END)
+    new = t[:i] + block + t[j:]
     if new == t:
         return False
     path.write_text(new, encoding="utf-8")
@@ -135,11 +180,11 @@ def write_placeholder_block(block: str) -> bool:
     t = FIX_README.read_text(encoding="utf-8")
     tag = "<!-- BEGIN GENERATED: placeholders -->", "<!-- END GENERATED: placeholders -->"
     wrapped = tag[0] + "\n" + block + "\n" + tag[1]
-    if tag[0] in t and tag[1] in t:
-        i, j = t.index(tag[0]), t.index(tag[1]) + len(tag[1])
-        new = t[:i] + wrapped + t[j:]
-    else:
-        new = t.rstrip() + "\n\n## 语料里出现的全部占位符\n\n" + wrapped + "\n"
+    n0, n1 = t.count(tag[0]), t.count(tag[1])
+    if n0 != 1 or n1 != 1:
+        raise SystemExit(f"❌ fixtures/README.md 的占位符标记不唯一（×{n0} / ×{n1}）⇒ 先修好再跑")
+    i, j = t.index(tag[0]), t.index(tag[1]) + len(tag[1])
+    new = t[:i] + wrapped + t[j:]
     if new == t:
         return False
     FIX_README.write_text(new, encoding="utf-8")
@@ -157,7 +202,7 @@ def main() -> int:
 
     if args.check:
         prov = json.loads(PROVENANCE.read_text(encoding="utf-8")) if PROVENANCE.exists() else {}
-        bad = []
+        bad = assert_no_duplicate_metrics()
         if prov.get("generator_sha16") != gen_sha:
             bad.append(
                 f"生成器变了（PROVENANCE 记 {prov.get('generator_sha16')}，"

@@ -60,7 +60,7 @@ continue-hook 实际要判定的对象。检测器只看这两段。
 
 **剔除改变了语料长度，也改变了统计数字。**
 ⇒ **不要引用任何固定的换算表** —— 那是历史快照，对应的是已经不在的语料版本。
-⇒ 当前口径请跑 `python3 scripts/verify_claims.py` 取，**并带上它打印的 sha256**。
+⇒ 要取现行数字请跑 `python3 scripts/verify_claims.py`，**并带上它打印的 sha256**。
 
 ⇒ **报数必须带语料 sha256。**
 
@@ -116,36 +116,6 @@ python3 scripts/verify_claims.py
    ⚠ 实测：邮箱这一类**只在扫描侧有、替换侧没有** ⇒ 第三方真实邮箱会原样
    留在公开语料里，而扫描器报「邮箱: 0」—— **两轮红队都没抓到**。
    ⇒ 模式串比对抓不到它，只能**拿真实样本跑一遍**。
-
-## 语料里出现的全部占位符
-
-跑 `--check` 通过后，语料里只剩这些占位符（括号内为当前出现次数，**随语料变**）：
-
-| 占位符 | 次数 | 替换了什么 |
-|---|---:|---|
-| `<TASK_CODE>` | 1930 | 内部任务代号（`C###` / `W##` / `G##` / `T##`，含 1 位数） |
-| `<TIME>` | 1008 | 时刻（`19:49` / `19:49:44`） |
-| `<REF>` | 418 | 内部引用编号（`R53` / `R57`，含 1 位数） |
-| `<DATE>` | 405 | 日期（`2026-10-15` / `2016年7月15日` / `2026/03` / `11月28日` / `2026年9-10月`） |
-| `<PLATFORM>` | 192 | 商业平台名（暴露变现策略） |
-| `<FAN_COUNT>` | 88 | 粉丝数（能定位到具体账号规模） |
-| `<PATH>` | 87 | 本机绝对路径 |
-| `<PRIVATE_TOOL>` | 71 | 私有工具名 |
-| `<PRIVATE_PATH>` | 57 | 私有目录名 |
-| `<PRIVATE_REPO>` | 31 | 私有仓名 |
-| `<CRON_ID>` | 25 | cron 任务 ID（可回指到本机调度系统） |
-| `<MEDIA_ID>` | 20 | 微信 media_id（账号级资产标识符） |
-| `<THIRD_PARTY>` | 7 | 第三方网名 / GitHub 账号 |
-| `<AUTHOR>` | 6 | 作者笔名 |
-| `<EMAIL_REDACTED>` | 6 | 邮箱 |
-| `<TIMESTAMP>` | 5 | ISO 时间戳 |
-| `<IP>` | 3 | 内网 IP |
-| `<READ_COUNT>` | 2 | 日均阅读数 |
-| `<AMOUNT>` / `<NUM>` / `<CLAIM>` / `<PUBLIC_ACCOUNT>` | 各 1 | 收益金额 / 倍数 / 夸大宣称 / 公众号名 |
-
-> `<SESSION_ID>` 的替换规则存在（28 个样本之一），但**当前语料里出现 0 次**
-> —— 会话 ID 那一列在裁剪时已整列删除。规则留着是为了下一批语料。
-> 不要以为「换出 0 次 = 规则没用」：`--self-test` 会单独验证它仍然有效。
 
 ## 已知边界（**完整清单**：这只门盖不住的全部情况）
 
@@ -216,14 +186,14 @@ python3 scripts/verify_claims.py
 <!-- BEGIN GENERATED: placeholders -->
 | 占位符 | 次数 |
 |---|---:|
-| `<CODE>` | 2300 |
-| `<TASK_CODE>` | 1944 |
-| `<TIME>` | 1001 |
-| `<REF>` | 413 |
-| `<DATE>` | 400 |
-| `<PLATFORM>` | 190 |
-| `<FAN_COUNT>` | 87 |
-| `<PATH>` | 86 |
+| `<TASK_CODE>` | 1956 |
+| `<TIME>` | 1009 |
+| `<REF>` | 417 |
+| `<DATE>` | 405 |
+| `<CODE>` | 217 |
+| `<PLATFORM>` | 192 |
+| `<FAN_COUNT>` | 88 |
+| `<PATH>` | 87 |
 | `<PRIVATE_TOOL>` | 71 |
 | `<PRIVATE_PATH>` | 57 |
 | `<PRIVATE_REPO>` | 31 |
@@ -231,7 +201,7 @@ python3 scripts/verify_claims.py
 | `<MEDIA_ID>` | 20 |
 | `<THIRD_PARTY>` | 7 |
 | `<AUTHOR>` | 6 |
-| `<EMAIL_REDACTED>` | 5 |
+| `<EMAIL_REDACTED>` | 6 |
 | `<TIMESTAMP>` | 5 |
 | `<IP>` | 3 |
 | `<READ_COUNT>` | 2 |
@@ -240,5 +210,5 @@ python3 scripts/verify_claims.py
 | `<CLAIM>` | 1 |
 | `<PUBLIC_ACCOUNT>` | 1 |
 
-合计 **6657** 处，23 种。
+合计 **4608** 处，23 种。
 <!-- END GENERATED: placeholders -->
