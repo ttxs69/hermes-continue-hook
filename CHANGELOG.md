@@ -80,7 +80,7 @@ The hook was, in practice, mostly switched off.
 | E5 | `demo1-replay.sh` 读私有 scratch 路径、讲已撤回的旧口径、与 `demo-all.sh` 数字打架 | **撤下**（`demo-all.sh` 已覆盖全部内容，且用仓内脱敏语料） |
 | E6 | 口径更正只在工作区，GitHub 上仍是旧的 510/33/43 | 与其它产物**同一个 commit** |
 
-**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `b87d47e0432a7587`）**：
+**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `a99d1fe7e7382854`）**：
 
 | | before | after |
 |---|---|---|
