@@ -65,4 +65,5 @@ echo "== npm pack (contents)"
 npm pack --dry-run > /dev/null
 
 echo
+python3 scripts/check_published_sha.py
 echo "all checks passed"

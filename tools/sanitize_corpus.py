@@ -16,7 +16,7 @@
    —— 不是隐私，但**会暴露商业策略**，一并脱敏
 
 **⚠ 最关键的一条**：**脱敏会改变语料 ⇒ 改变统计数字。**
-实测：第一次脱敏后「被 boundary 提前放行」从 506 → **504**
+实测：第一次脱敏后「被 boundary 提前放行」就变了（数字随语料变）
 （因为被脱敏的词里有 2 条命中过 boundary）。
 ⇒ **每次脱敏后必须重跑 `scripts/verify_claims.py` 并同步所有声称的数字。**
 
@@ -104,6 +104,17 @@ SUB_RULES: list[tuple[str, str, str, bool, tuple[str, str]]] = [
     #   ⇒ **一条都不许用 `\b`**：Python 的 `\b` 定义在 `\w` 边界上，
     #     而**汉字与带圈数字 ①②③ 都是 `\w`** ⇒ 中文语料的主流写法
     #     （数字紧贴汉字）会同时骗过替换侧与扫描侧 ⇒ 绿灯是结构性的。
+    # ⚠⚠ 会话ID **必须排在最前**（红队第四轮 D-4）：
+    #   现实 sid 都以 20xx 开头 ⇒ 8 位日期会先被「日期」规则吃掉
+    #   ⇒ 它排在日期之后就是**死代码**（实测：对所有真实 sid 永不触发）
+    # ── 会话 ID（形如 `20260918_090905_ae4f7e66`）──
+    (
+        r"(?<![0-9A-Za-z_])\d{8}_\d{6}_[0-9a-f]{6,}(?![0-9A-Za-z_])",
+        "<SESSION_ID>",
+        "会话ID",
+        False,
+        ("会话 20260918_090905_ae4f7e66", "20260918_090905_ae4f7e66"),
+    ),
     # ── 私有资产名（会暴露内部结构；长的先替）──
     (r"mpdt[\w-]*", "<PRIVATE_TOOL>", "私有工具", False, ("工具 mpdt-public 跑一下", "mpdt")),
     (
@@ -190,10 +201,10 @@ SUB_RULES: list[tuple[str, str, str, bool, tuple[str, str]]] = [
         ("配置在 ~" + "/.baoyu-skills/.env", "~/.baoyu"),
     ),
     # ── 内部代号（作者工作流的引用编号，如 R53/R57/R64）──
-    #   ⚠ 原来用 `\bR\d{2,3}\b` ⇒「但R57隐含」「①R95=源」这类全漏
+    #   ⚠ 原来用 `\bR\d{1,3}\b` ⇒「但R57隐含」「①R95=源」这类全漏
     #   ⇒ 实测公开语料里活着 8 处，而扫描器报「内部代号: 0」。
     (
-        r"(?<![0-9A-Za-z_])R\d{2,3}(?![0-9A-Za-z_])",
+        r"(?<![0-9A-Za-z_])R\d{1,3}(?![0-9A-Za-z_])",
         "<REF>",
         "内部代号",
         False,
@@ -201,7 +212,7 @@ SUB_RULES: list[tuple[str, str, str, bool, tuple[str, str]]] = [
     ),
     #   ⚠ 任务代号 C###/W##/G##（实测 1556 处 / 510 行，两侧原本都无规则）
     (
-        r"(?<![0-9A-Za-z_])[CWG]\d{2,3}(?![0-9A-Za-z_])",
+        r"(?<![0-9A-Za-z_])[CWGT]\d{1,3}(?![0-9A-Za-z_])",
         "<TASK_CODE>",
         "内部任务代号",
         False,
@@ -259,14 +270,6 @@ SUB_RULES: list[tuple[str, str, str, bool, tuple[str, str]]] = [
     (r"(?<!\d)20\d{2}/\d{1,2}(?!\d|/)", "<DATE>", "日期", True, ("政策 2026/3 起", "2026/3")),
     # ── 微信 media_id：草稿箱资产标识符，账号级、可枚举 ──
     (r"Kqz5[A-Za-z0-9_\-]{40,}", "<MEDIA_ID>", "media_id", False, ("素材 Kqz5" + "A" * 45, "Kqz5")),
-    # ── 会话 ID（形如 `20260918_090905_ae4f7e66`）──
-    (
-        r"(?<![0-9A-Za-z_])\d{8}_\d{6}_[0-9a-f]{6,}(?![0-9A-Za-z_])",
-        "<SESSION_ID>",
-        "会话ID",
-        False,
-        ("会话 20260918_090905_ae4f7e66", "20260918_090905_ae4f7e66"),
-    ),
     # ── 公众号名 + 粉丝数（能定位到「地球online实况」这个号及其规模）──
     (
         r"地球online实况",
@@ -361,12 +364,16 @@ RESIDUAL_PATTERNS: dict[str, str] = {
     "私有仓": r"daily-ledger|moneymaker",
     "私有工具": r"(?<![0-9A-Za-z_])mpdt(?![0-9A-Za-z_])|mpdt-|afdian|zhongcao-cover-maker",
     "商业平台": r"Gumroad|Substack|Creem|爱发电|知识星球|闲鱼|小红书|PayPal",
-    "内部代号": r"(?<![0-9A-Za-z_])R\d{2,3}(?![0-9A-Za-z_])",
+    "内部代号": r"(?<![0-9A-Za-z_])R\d{1,3}(?![0-9A-Za-z_])",
     # ⚠ 新增：任务代号 C###/W##/G##（实测 1556 处 / 510 行，两侧原本都无规则）
-    "内部任务代号": r"(?<![0-9A-Za-z_])[CWG]\d{2,3}(?![0-9A-Za-z_])",
+    "内部任务代号": r"(?<![0-9A-Za-z_])[CWGT]\d{1,3}(?![0-9A-Za-z_])",
     # ⚠ 日期的各种写法；⚠ **不能有 `\b`**（汉字是 `\w`）
     #   ⚠ 年份区间（`2018-2019`）**不是日期**，是市场数据 ⇒ 不匹配
+    # ⚠ 方向 B 升级后抓到的 3 个**真扫描侧漏洞**（红队第四轮 D-2 附）：
+    #   「年月」（`2026-07`）、「日收益 X 元」、「日收益 × N」原来只被替换、
+    #   不被扫描 ⇒ 那三条规则改坏了没人知道。
     "日期": r"(?<!\d)20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}(?!\d)|(?<!\d)20\d{6}(?!\d)"
+    r"|(?<!\d)20\d{2}[-年]\d{1,2}(?![-年\d])"
     r"|(?<!\d)\d{1,2}月\d{1,2}日"
     r"|(?<!\d)20\d{2}年\d{1,2}[-–~至]\d{1,2}月(?!\d)"
     r"|(?<!\d)20\d{2}/\d{1,2}(?!\d|/)",
@@ -386,7 +393,8 @@ RESIDUAL_PATTERNS: dict[str, str] = {
     # ⚠ R311 红队 E3：冷发信 SOP / cron 时刻表 / 自家账号规模 —— 原扫描器不查这三类
     "冷发信SOP": r"(发信器|话术是|分成两批|SMTP\s*exit|掉量小号|接单入口)",
     "cron调度": r"(cron\s*(时刻表|调度)|周[一二三四五六日]\s*\d{1,2}:\d{2})",
-    "账号规模": r"(?<![0-9])\d+\s*粉|日(?:均)?阅读量?\s*[~≈]?\s*\d+",
+    "账号规模": r"(?<![0-9])\d+\s*粉|日(?:均)?阅读量?\s*[~≈]?\s*\d+"
+    r"|日收益\s*[~≈]?\s*[\d.]+\s*元|日收益\s*×\s*\d+",
     "内部项目名": r"(ai-trends|ttxs69\.github\.io/ai-trends)",
 }
 
@@ -499,10 +507,19 @@ def residual_scan(text: str) -> dict[str, int]:
     #     ① 扫描报 0、替换没做 ⇒ **结构性绿灯**（邮箱那一类就是这样被抓到的）
     #     ② 扫描报错、替换也不做 ⇒ 「门红但改不掉」（长数字那一类）
     #   ⇒ 段化计算让两类不一致**在结构上不可能**。
+    #   ⚠ 红队第四轮 D-5：替换侧的豁免是**逐条显式声明**（SUB_RULES 第 4 项），
+    #     但扫描侧还在用 `_is_url_exempt(类别正则)` 做 **marker 子串猜**
+    #     ⇒ 两侧结论相反的有 1 类（时间戳：声明 False「URL 内要替换」/
+    #     扫描判 True「URL 内不查」）⇒ **URL 内的时间戳被替换了但永不被检查**。
+    #     ⇒ 现在两侧同源：一个类别下**所有**规则都声明豁免，该类才算豁免
+    #     （取交集 ⇒ 宁可多扫，不可少扫）。
+    class_exempt: dict[str, bool] = {}
+    for _p, _r, _c, _ex, _s in SUB_RULES:
+        class_exempt[_c] = class_exempt.get(_c, True) and _ex
     segments = _split_by_url(text)
     counts: dict[str, int] = {}
     for name, pat in RESIDUAL_PATTERNS.items():
-        exempt = _is_url_exempt(pat)
+        exempt = class_exempt.get(name, False)
         n = 0
         for is_url, chunk in segments:
             if is_url and exempt:
@@ -726,6 +743,7 @@ RESIDUAL_SAMPLES: dict[str, tuple[str, str]] = {
     "私有仓": ("仓库 daily-ledger", "daily-ledger"),
     "私有工具": ("工具 mpdt-public", "mpdt"),
     "商业平台": ("上架到 Gumroad", "Gumroad"),
+    "内部任务代号": ("任务 C334 探针文", "C334"),
     "内部代号": ("见 R311 第 3 条", "R311"),
     "日期": ("提交 2026-10-15 完成", "2026-10-15"),
     "时间戳": ("跑于 2026-10-20T07:25:14", "07:25:14"),
@@ -746,50 +764,65 @@ RESIDUAL_SAMPLES: dict[str, tuple[str, str]] = {
 }
 
 
-def reconcile() -> list[str]:
-    """扫描侧 ↔ 替换侧/剔除侧的**双向**对账。返回问题列表（空 = 一致）。
-
-    ⚠⚠ **必须是双向的，而且粒度要到「每一条规则」**（红队第三轮 P0-2）：
-      我第一版只走**方向 A**（扫描侧有类别 ⇒ 替换侧要有规则），
-      于是出现了一个更隐蔽的假绿灯：
-        把某条替换规则改坏（`afdian`，原始语料里真实出现 13 次）
-        ⇒ 公开语料带着原始串发布
-        ⇒ 而 `--check` 与 `--self-test` **双双 exit 0**
-      因为**那条规则对应的扫描类别根本不存在** ⇒ 扫描器压根不查它。
-
-    后来我第二版只把粒度提到「类别」，**还是不够**：
-      「私有工具」这一类有 3 条规则（mpdt / zhongcao-cover-maker / afdian），
-      样本只测了 mpdt ⇒ **改坏 afdian 仍然不被发现**。
-      ⇒ 现在粒度是**每条规则一个专属样本**（SUB_RULES 的第 5 项）。
-
-    三个方向：
-      A：每个扫描类别 ⇒ 有替换规则或剔除规则覆盖
-      B：每条替换规则 ⇒ 声明的类别存在于 RESIDUAL_PATTERNS
-      C：每条替换规则 ⇒ **它自己的样本**跑一遍 sanitize，敏感串必须消失
-         （C 才是能抓住「改坏某一条规则」的那一半）
-    """
+def _reconcile_a() -> list[str]:
+    """方向 A：每个扫描类别 ⇒ 有替换规则或剔除规则覆盖。"""
     problems = []
-    # ── 方向 A ──
     for name, (raw, must) in RESIDUAL_SAMPLES.items():
         replaced = must not in sanitize(raw)
         dropped = not drop_rows([{"text": raw}])[0]
         if not (replaced or dropped):
             problems.append(f"「{name}」既没有替换规则也没有剔除规则 ⇒ 扫描器报 0、产物里原样残留")
-    # ── 方向 B ──
-    for pat, _rep, cat, _ex, _s in SUB_RULES:
+    return problems
+
+
+def _reconcile_b() -> list[str]:
+    """方向 B：每条替换规则 ⇒ 声明的类别存在，**且该类别的扫描正则能命中它的样本**。
+
+    ⚠ 红队第四轮实测：只查「类别名存在」⇒ **52 条里 51 条**把 cat 改成另一个
+    已存在的类别后**完全不被发现**（类别标签成了装饰）。
+    """
+    problems = []
+    for pat, _rep, cat, _ex, (raw, _must) in SUB_RULES:
         if cat not in RESIDUAL_PATTERNS:
             problems.append(
                 f"替换规则 {pat[:40]!r} 声明的类别 {cat!r} 不在 RESIDUAL_PATTERNS 里"
                 f" ⇒ 这条规则坏了没人知道（扫描器压根不查它）"
             )
-    # ── 方向 C（**逐条规则**；这一半原来没有）──
-    for pat, _rep, _cat, _ex, (raw, must) in SUB_RULES:
+        elif not re.search(RESIDUAL_PATTERNS[cat], raw):
+            problems.append(
+                f"替换规则 {pat[:40]!r} 声明的类别 {cat!r} 的**扫描正则命中不了它自己的样本** "
+                f"{raw!r} ⇒ 类别标签只是装饰，扫描侧漏了这种形态"
+            )
+    return problems
+
+
+def _reconcile_c() -> list[str]:
+    """方向 C：**逐条规则**验证 —— 规则要命中自己的样本、替换后要变化、产物里不许留 must。
+
+    ⚠ 红队第四轮 D-2：原来断言的是「**最终串里没有 must**」，而不是
+    「**这条规则吃掉了 must**」⇒ 同类别里的兄弟规则顺手覆盖时，C 无法区分
+    「这条规则在工作」和「邻居替它干了」。实测 7/52 条改坏后仍判有效，
+    其中 3 条（时刻 28 行 / 时间戳 5 行 / 日期 6 行）**产物真的变了而三道门全绿**。
+    """
+    problems = []
+    for pat, rep, _cat, _ex, (raw, must) in SUB_RULES:
         try:
+            if not re.search(pat, raw):
+                problems.append(
+                    f"替换规则 {pat[:40]!r} **命中不了自己的样本** {raw!r}"
+                    f" ⇒ 样本写错了，或规则被改坏了"
+                )
+                continue
+            if re.sub(pat, rep, raw) == raw:
+                problems.append(
+                    f"替换规则 {pat[:40]!r} 匹配了样本但**替换后没有任何变化** {raw!r}"
+                    f" ⇒ 规则或替换串被改坏了"
+                )
+                continue
             out = sanitize(raw)
         except Exception as e:
             # ⚠ 坏正则（括号不配对之类）会让 sanitize **抛异常**
-            #   ⇒ 对账必须**报告**它，而不是跟着崩（崩虽然也是非零退出，
-            #   但报错形态是 traceback，读者不知道是「规则坏了」）。
+            #   ⇒ 对账必须**报告**它，而不是跟着崩（traceback 读者看不出「规则坏了」）。
             problems.append(
                 f"替换规则 {pat[:40]!r} 抛异常（规则本身坏了）：{type(e).__name__}: {e}"
             )
@@ -799,7 +832,12 @@ def reconcile() -> list[str]:
                 f"替换规则 {pat[:40]!r} 对自己的样本无效：{raw!r} ⇒ {out!r}"
                 f"（这条规则被改坏了，而扫描侧不会发现）"
             )
-    # ── 反向：每个扫描类别 ⇒ 至少有一条替换规则声明它，或它由剔除规则覆盖 ──
+    return problems
+
+
+def _reconcile_reverse() -> list[str]:
+    """反向：每个扫描类别 ⇒ 至少有一条替换规则声明它，或它是剔除类别 / 有样本。"""
+    problems = []
     declared = {cat for _p, _r, cat, _e, _s in SUB_RULES}
     drop_cats = {name for name, _p in DROP_ROW_PATTERNS}
     for name in RESIDUAL_PATTERNS:
@@ -807,6 +845,24 @@ def reconcile() -> list[str]:
             continue
         problems.append(f"扫描类别 {name!r} 没有任何替换规则声明它，也不在剔除类别里")
     return problems
+
+
+def reconcile() -> list[str]:
+    """扫描侧 ↔ 替换侧/剔除侧的对账。返回问题列表（空 = 一致）。
+
+    ⚠⚠ **必须双向，而且粒度要到「每一条规则」**（红队第三轮 P0-2）：
+
+      第一版只走**方向 A**（扫描侧有类别 ⇒ 替换侧要有规则），于是出现更隐蔽的假绿灯：
+        把某条替换规则改坏（`afdian`，原始语料里真实出现 13 次）
+        ⇒ 公开语料带着原始串发布，而 `--check` 与 `--self-test` **双双 exit 0**。
+      第二版把粒度提到「类别」，**还是不够**：「私有工具」这一类有 3 条规则
+      （mpdt / zhongcao-cover-maker / afdian），样本只测了 mpdt ⇒ 改坏 afdian 仍不被发现。
+      ⇒ 现在粒度是**每条规则一个专属样本**（SUB_RULES 的第 5 项）。
+
+    四个方向：A 扫描类别⇒有规则/剔除规则；B 规则⇒类别存在**且扫描正则能命中它的样本**；
+    C **规则⇒跑自己的样本，敏感串必须消失**；反向 每个扫描类别⇒有规则声明它。
+    """
+    return _reconcile_a() + _reconcile_b() + _reconcile_c() + _reconcile_reverse()
 
 
 def self_test() -> int:
