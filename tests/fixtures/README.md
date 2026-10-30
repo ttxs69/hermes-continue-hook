@@ -67,7 +67,7 @@ continue-hook 实际要判定的对象。检测器只看这两段。
 ## 验证
 
 ```bash
-# 残留扫描（29 类 + 应剔除却仍在 = 30 项，必须全 0）
+# 残留扫描（31 类 + 应剔除却仍在 = 32 项，必须全 0）
 python3 tools/sanitize_corpus.py --check tests/fixtures/real_turns.jsonl
 
 # 从原始语料重新生成（可重现）
@@ -77,7 +77,7 @@ python3 tools/sanitize_corpus.py --in <原始.jsonl> --out tests/fixtures/real_t
 python3 scripts/verify_claims.py
 ```
 
-`--check` 会对以下 **29 类**逐项计数并要求全为 0
+`--check` 会对以下 **31 类**逐项计数并要求全为 0
 （名称与代码里的 `RESIDUAL_PATTERNS` 键**逐字一致**）：
 
 `手机号`、`邮箱`、`身份证`、`绝对路径`、`家目录路径`、`IP`、`长数字`、`密钥`、`私有仓`、`私有工具`、`商业平台`、`内部代号`、`内部任务代号`、`日期`、`时间戳`、`时刻`、`作者笔名`、`cron任务ID`、`第三方账号`、`会话ID`、`media_id`、`公众号名`、`粉丝数`、`第三方网名`、`自曝经营`、`冷发信SOP`、`cron调度`、`账号规模`、`内部项目名`
@@ -171,12 +171,13 @@ python3 scripts/verify_claims.py
 扫描侧照旧命中 `M4`/`A4`/`H5`/`MD5` ⇒ 报「内部编号形态: 5」⇒ 门红且改不掉。
 
 **代价（如实记录）**：
-- 原始语料里 **1360 种 / 8604 次**会被打码。抽查前 250 个全是真代号
-  （`C1`/`P14`/`Q4`/`C73-petdrug-mp`/`AP10`…）
-- 白名单 112 项（`V2EX`/`GPT-6`/`H264`/`MP3`/`A4`/`H5`/`K8s`/`MD5`/`SHA256`…），
+- 原始语料里会被打码的 token 有**若干种 / 若干次**（**具体数字随规则变，
+  以 `python3 tools/coverage_check.py <原始语料>` 的输出为准**，不要抄在这里）。
+  抽查前 250 个全是真代号（`C1`/`P14`/`Q4`/`C73-petdrug-mp`/`AP10`…）
+- 白名单 126 项（`V2EX`/`GPT-6`/`H264`/`MP3`/`A4`/`H5`/`K8s`/`MD5`/`SHA256`…），
   每项都写了理由
 - **作用域限制**：只处理大写开头 ⇒ 小写开头的代号（极罕见）会漏。
-  冒烟测试发现全收会打码 **4507 种 / 19336 次**，其中包括
+  冒烟测试发现若不限制开头，**打码量会暴涨一个量级**，其中包括
   `n1`/`n2`/`v0`/`48h`/`h24` 这些正常词 ⇒ 可读性会崩
 - `coverage_check.py` 现在的角色是**可读性守护**：报告「白名单是不是漏了哪些技术词」，
   不再承担安全性（安全性由兜底层保证）
@@ -186,11 +187,11 @@ python3 scripts/verify_claims.py
 <!-- BEGIN GENERATED: placeholders -->
 | 占位符 | 次数 |
 |---|---:|
-| `<TASK_CODE>` | 1956 |
-| `<TIME>` | 1009 |
+| `<TASK_CODE>` | 1953 |
+| `<TIME>` | 1008 |
 | `<REF>` | 417 |
-| `<DATE>` | 405 |
-| `<CODE>` | 217 |
+| `<CODE>` | 409 |
+| `<DATE>` | 404 |
 | `<PLATFORM>` | 192 |
 | `<FAN_COUNT>` | 88 |
 | `<PATH>` | 87 |
@@ -210,5 +211,5 @@ python3 scripts/verify_claims.py
 | `<CLAIM>` | 1 |
 | `<PUBLIC_ACCOUNT>` | 1 |
 
-合计 **4608** 处，23 种。
+合计 **4795** 处，23 种。
 <!-- END GENERATED: placeholders -->

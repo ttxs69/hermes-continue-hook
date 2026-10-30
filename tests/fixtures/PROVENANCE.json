@@ -1,17 +1,17 @@
 {
-  "generator_sha16": "9a6e1b8235897f4e",
+  "generator_sha16": "107af7d630dcce47",
   "raw_corpus_sha16": "7afce96ff92304eb",
-  "fixture_sha16": "3d7ec5ed6e7b2953",
+  "fixture_sha16": "5046e44cece3d346",
   "fixture_lines": 1341,
   "metrics": {
     "nudge_old": 29,
-    "early_old": 461,
+    "early_old": 460,
     "truly": 10,
     "nudge_new": 39,
     "early_new": 0,
     "total": 1341,
-    "early_pct": 34.37733035048471,
+    "early_pct": 34.3027591349739,
     "truly_pct": 0.7457121551081283,
-    "both_pass": 451
+    "both_pass": 450
   }
 }

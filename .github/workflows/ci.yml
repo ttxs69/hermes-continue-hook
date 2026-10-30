@@ -216,6 +216,10 @@ jobs:
           # 真正的覆盖率检查需要**原始语料**（不在仓里，不能进公开仓）。
           # CI 只能保证工具本身能跑、登记表结构正确。
           python3 tools/coverage_check.py --self-test
+      - name: Every documented number matches what the code actually does
+        run: python3 tools/check_docs_consistency.py
+      - name: The allowlist and the redaction rules agree
+        run: python3 tools/coverage_check.py --self-test
       - name: Published artifacts carry the current corpus sha
         run: python3 scripts/check_published_sha.py
       - name: The published corpus is a fixed point of the generator

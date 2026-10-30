@@ -606,13 +606,13 @@ Multi-agent support, modelled on the per-harness manifest pattern used by
 - Tests: 16 dsh contract + detector-CLI tests.
 
 <!-- BEGIN GENERATED: metrics -->
-**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `3d7ec5ed6e7b2953`）**：
+**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `5046e44cece3d346`）**：
 
 | | before | after |
 |---|---|---|
-| released early by `boundary` | **461 (34.4%)** | **0** |
+| released early by `boundary` | **460 (34.3%)** | **0** |
 | actually nudged | 29 | **39** (+10 recovered) |
 
-**真正的误放行 = 10 条（0.7%）**，不是 461 条 ——
-其余 451 条两版都放行（本来就没有触发信号，**不算误判**）。
+**真正的误放行 = 10 条（0.7%）**，不是 460 条 ——
+其余 450 条两版都放行（本来就没有触发信号，**不算误判**）。
 <!-- END GENERATED: metrics -->

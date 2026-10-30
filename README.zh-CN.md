@@ -343,7 +343,7 @@ deliverables/demos/demo-all.gif
 | 3 | 「10 个宿主怎么保证规则一致」 | `scripts/check_hosts.py` | 9 个 adapter 结构化路由 + 84 项契约测试 |
 
 **语料**：`tests/fixtures/real_turns.jsonl` —— 真实 agent 收尾，脱敏与剔行后
-**1341** 条（`sha256[:16] = 3d7ec5ed6e7b2953`）。脱敏规则、剔除原因、已知边界见
+**1341** 条（`sha256[:16] = 5046e44cece3d346`）。脱敏规则、剔除原因、已知边界见
 [`tests/fixtures/README.md`](tests/fixtures/README.md)，生成器 `tools/sanitize_corpus.py`
 可以重跑验证。
 
@@ -363,8 +363,8 @@ python3 scripts/verify_claims.py     # 交叉核对三个脚本
 ## 测试
 
 ```bash
-python3 -m unittest discover -s tests   # 191 tests: detector, plugin, 8 adapters, dsh/pi contracts
-npx vitest run                          # 68 tests: OpenCode plugin, installer, lifecycle invariants, dsh
+python3 -m unittest discover -s tests   # 356 tests: detector, plugin, 9 adapters, dsh/pi contracts
+npx vitest run                          # 356 tests: OpenCode plugin, installer, lifecycle invariants, dsh
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
 
@@ -488,9 +488,9 @@ bug——一个并不存在的属性、一个被当 `Error` 读的 `unknown` 错
 制造无谓的改动，不是真正的整洁。
 
 ```bash
-python -m unittest discover -s tests     # 191 tests, no dependencies
+python -m unittest discover -s tests     # 356 tests, no dependencies
 python -m pytest --cov                   # same suite + coverage floor
-npx vitest run --coverage                # 68 tests + coverage floor
+npx vitest run --coverage                # 356 tests + coverage floor
 npx eslint . && npx prettier --check '**/*.{js,mjs,ts,json,yml}'
 npx tsc -p tsconfig.json && npx tsc -p tsconfig.checkjs.json
 ```

@@ -71,4 +71,9 @@ if [ -n "${MONEYMAKER_RAW_CORPUS:-}" ]; then
   python3 tools/coverage_check.py "$MONEYMAKER_RAW_CORPUS"
 fi
 python3 scripts/check_published_sha.py
+# ⚠⚠ **第十一轮的教训**：我修了 `rebuild --check` 这个门，却**没把它接进 CI** ——
+#   红队的原话：「不在 CI 里的门就不是门」（我自己写在 CI 注释里的那句话）。
+#   ⇒ 现在所有门都必须出现在这里；新增门时**必须**同时加进本文件与 CI 的 corpus-gate。
+python3 tools/coverage_check.py --self-test
+python3 tools/check_docs_consistency.py
 echo "all checks passed"

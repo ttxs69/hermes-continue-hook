@@ -43,6 +43,14 @@ FIX_README = ROOT / "tests" / "fixtures" / "README.md"
 
 BEGIN = "<!-- BEGIN GENERATED: metrics -->"
 END = "<!-- END GENERATED: metrics -->"
+# README 里语料 sha 的引用（两边句式不同，用正则整体替换）
+README_SHA_RE = {
+    "README.md": re.compile(
+        r"\*\*\d+\*\* after redaction and row removal\n"
+        r"\(`sha256\[:16\] = [0-9a-f]{16}`\)\."
+    ),
+    "README.zh-CN.md": re.compile(r"\*\*\d+\*\*\s*条（`sha256\[:16\] = [0-9a-f]{16}`）。"),
+}
 
 
 def sha16(path: Path) -> str:
@@ -101,6 +109,28 @@ def placeholder_table() -> str:
     lines.append("")
     lines.append(f"合计 **{sum(c.values())}** 处，{len(c)} 种。")
     return "\n".join(lines)
+
+
+def rewrite_readme_sha(sha: str, n: int) -> list[str]:
+    """README（中英）里的语料条数 + sha 也由脚本写（原先手抄 ⇒ 必然漂）。
+
+    红队第十一轮：「全仓数字不一致共 16 处」—— 其中 sha 那两处就是这么来的。
+    """
+    changed = []
+    for rel, rx in README_SHA_RE.items():
+        f = ROOT / rel
+        if not f.exists():
+            continue
+        t = f.read_text(encoding="utf-8")
+        if rel == "README.md":
+            rep = f"**{n}** after redaction and row removal\n(`sha256[:16] = {sha}`)."
+        else:
+            rep = f"**{n}** 条（`sha256[:16] = {sha}`）。"
+        new = rx.sub(rep, t)
+        if new != t:
+            f.write_text(new, encoding="utf-8")
+            changed.append(rel)
+    return changed
 
 
 def assert_no_duplicate_metrics() -> list[str]:
@@ -232,6 +262,7 @@ def main() -> int:
     PROVENANCE.write_text(json.dumps(prov, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     changed = []
+    changed.extend(rewrite_readme_sha(sha, n))
     if replace_block(CHANGELOG, metrics_block(sha, n, m)):
         changed.append("CHANGELOG.md")
     if write_placeholder_block(placeholder_table()):
