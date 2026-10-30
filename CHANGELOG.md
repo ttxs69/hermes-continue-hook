@@ -80,17 +80,17 @@ The hook was, in practice, mostly switched off.
 | E5 | `demo1-replay.sh` 读私有 scratch 路径、讲已撤回的旧口径、与 `demo-all.sh` 数字打架 | **撤下**（`demo-all.sh` 已覆盖全部内容，且用仓内脱敏语料） |
 | E6 | 口径更正只在工作区，GitHub 上仍是旧的 510/33/43 | 与其它产物**同一个 commit** |
 
-**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `a385e3436a075430`）**：
+**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `4450c68599530302`）**：
 
 | | before | after |
 |---|---|---|
-| released early by `boundary` | **468 (34.9%)** | **0** |
+| released early by `boundary` | **466 (34.8%)** | **0** |
 | actually nudged | 29 | **39** (+10 recovered) |
 
-**真正的误放行 = 10 条（0.7%）**，不是 468 条 —— 其余 458 条两版都放行
+**真正的误放行 = 10 条（0.7%）**，不是 466 条 —— 其余 456 条两版都放行
 （本来就没有触发信号，**不算误判**）。
 
-⇒ 删表的价值**不是**「多抓了 10 条」，是 **468 条回复的放行理由**
+⇒ 删表的价值**不是**「多抓了 10 条」，是 **466 条回复的放行理由**
 从「命中了词表」变成「没有触发信号」。
 
 **⚠ 三个脚本现在互为交叉验证**：`replay_real.py` / `replay_regression.py` /
@@ -98,7 +98,7 @@ The hook was, in practice, mostly switched off.
 打印语料 sha256 —— **任一不一致就 exit 78**。
 
 **⚠ 数字口径会随语料漂移**：本表所有数字绑定
-`sha256[:16] = a385e3436a075430`。语料一改必须重跑
+`sha256[:16] = 4450c68599530302`。语料一改必须重跑
 `verify_claims.py` 并同步本表。
 
 ### The guard moved into the nudge text
