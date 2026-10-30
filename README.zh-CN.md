@@ -325,6 +325,41 @@ Patch mode 会改动 **Hermes core 的源码树**。这让它成为最难维护�
 * [docs/DESIGN.md](docs/DESIGN.md) —— 为 Hermes plugin 评估过的十二条路线，以及每一条被否掉的原因
 * [docs/PUBLISHING.md](docs/PUBLISHING.md) —— 一次发布如何到达 npm（trusted publishing / OIDC，以及首次发布时的分阶段发布路径）
 
+## Demo —— 四段可以当场复算的演示
+
+面试官问「你怎么知道你的判断是对的」，最能加分的回答不是数字，是**当场把数字复算一遍**。
+
+```bash
+bash deliverables/demos/demo-all.sh      # 四段串讲一次跑完
+# 或者直接看录屏（终端 -> GIF，不需要任何播放器）
+deliverables/demos/demo-all.gif
+```
+
+| 段 | 面试官会问的追问 | 脚本 | 它证明了什么 |
+|---|---|---|---|
+| 1 | 「你怎么知道你的判断是对的」 | `scripts/replay_real.py` | 在真实收尾语料上给触发/放行分布 |
+| 2 | 「误伤了怎么办？你测过吗」 | `scripts/replay_regression.py` | 同一批语料跑 v1.4.1（带词表）vs v1.5.1（删表） |
+| 2b | 「你怎么保证这些数没被你写错」 | `scripts/verify_claims.py` | 从零重写一遍再核对，不 import 上面两个脚本 |
+| 3 | 「10 个宿主怎么保证规则一致」 | `scripts/check_hosts.py` | 9 个 adapter 结构化路由 + 84 项契约测试 |
+
+**语料**：`tests/fixtures/real_turns.jsonl` —— 真实 agent 收尾，脱敏与剔行后
+**1348** 条（`sha256[:16] = b8068ccb0cef0cf2`）。脱敏规则、剔除原因、已知边界见
+[`tests/fixtures/README.md`](tests/fixtures/README.md)，生成器 `tools/sanitize_corpus.py`
+可以重跑验证。
+
+**注意**：复算需要 clone 仓库（语料在 `tests/` 下，`.npmignore` 把它排除在 npm 包外）：
+
+```bash
+git clone https://github.com/ttxs69/hermes-continue-hook
+cd hermes-continue-hook
+python3 scripts/verify_claims.py     # 交叉核对三个脚本
+```
+
+**为什么要有「独立复算」这一段**：它当场抓出了我自己写的另一个脚本的 bug ——
+我把**新版**的配置喂给了**旧版** detector，新版配置里没有 boundary 键，
+旧版拿不到词表，跑出「误放行 0 条」这种**看起来很干净的错数**。
+只有一个实现时，这个 bug 永远不会暴露。
+
 ## 测试
 
 ```bash

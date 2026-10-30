@@ -356,6 +356,45 @@ of date.
 * [docs/PUBLISHING.md](docs/PUBLISHING.md) — how a release reaches npm
   (trusted publishing / OIDC, and the staged-publishing path for a first release)
 
+## Demo — four segments you can recompute live
+
+When an interviewer asks "how do you know your judgement is right?", the best
+answer is not a number, it is recomputing that number on the spot.
+
+```bash
+bash deliverables/demos/demo-all.sh      # all four segments in one run
+# or just watch the recording (terminal -> GIF, no player needed)
+deliverables/demos/demo-all.gif
+```
+
+| Segment | The follow-up question | Script | What it proves |
+|---|---|---|---|
+| 1 | "How do you know your judgement is right?" | `scripts/replay_real.py` | trigger/release distribution over real closing turns |
+| 2 | "What about false positives? Did you measure?" | `scripts/replay_regression.py` | v1.4.1 (word list) vs v1.5.1 (no list) on the same corpus |
+| 2b | "How do you know those numbers are not just what you wanted to see?" | `scripts/verify_claims.py` | recomputes everything from scratch, importing neither script above |
+| 3 | "Ten hosts — how do you keep the rule identical?" | `scripts/check_hosts.py` | 9 adapters route structurally + 84 contract tests |
+
+**Corpus**: `tests/fixtures/real_turns.jsonl` — real agent closing turns,
+**1348** after redaction and row removal
+(`sha256[:16] = b8068ccb0cef0cf2`). Redaction rules, removal reasons and known
+limits are in [`tests/fixtures/README.md`](tests/fixtures/README.md); the
+generator `tools/sanitize_corpus.py` can be re-run to prove it.
+
+**Note**: recomputing needs a clone (the corpus lives under `tests/`, which
+`.npmignore` keeps out of the npm package):
+
+```bash
+git clone https://github.com/ttxs69/hermes-continue-hook
+cd hermes-continue-hook
+python3 scripts/verify_claims.py     # cross-checks all three scripts
+```
+
+**Why an independent recomputation exists**: it caught a bug in my own other
+script — I fed the **new** config to the **old** detector, the new config has
+no boundary key, the old one then found no word list, and it printed "0 false
+positives" — a *clean-looking* wrong number. With only one implementation, that
+bug would never have surfaced.
+
 ## Tests
 
 ```bash
