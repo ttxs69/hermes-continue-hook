@@ -437,9 +437,196 @@ SUB_RULES: list[tuple[str, str, str, bool, tuple[str, str]]] = [
         True,
         ("C4xx 段未压缩", "C4xx"),
     ),
+    # ⚠ 纯字母的多段编号（`FORM-COMBO`）—— 兜底层只兜「字母+数字混合」，
+    #   不含数字的段漏在外面（红队第八轮点名）。
+    #   零误伤核对：`W-8BEN`(W 单字母)、`SHA-256`/`GPT-6`/`CVE-2026`(含数字)、
+    #   `IPv6`(无连字符) 都不匹配。
+    (
+        r"(?<![0-9A-Za-z_])[A-Z]{2,}-[A-Z]{2,}(?![A-Za-z0-9-])",
+        "<TASK_CODE>",
+        "内部编号形态",
+        True,
+        ("FORM-COMBO 解锁窗", "FORM-COMBO"),
+    ),
 ]
 
 # ── 残留扫描（脱敏后必须全为 0）──
+# ── 兜底层的白名单：**只有列在这里的「字母+数字混合 token」才允许原样出现** ──
+#
+# 为什么需要这一层（红队第八轮把我上一版的覆盖率工具打穿了）：
+#   上一版是**黑名单**思路 —— 枚举「像代号」的形态，逐个加规则，再用一个工具
+#   检查「还有哪些没被覆盖」。红队自造 6 种真代号，那个工具**只抓到 2/6**：
+#   它自己用 `\b`（正是它要防的那个 bug）、限 8 字符、只收大写开头
+#   ⇒ 粘着汉字 / 长 ID / 小写代号 / Unicode 下标四类**连 token 都提不出来**。
+#
+#   ⇒ **黑名单在原理上不可能完备**：正则只能枚举已知形态，未知形态永远漏。
+#   ⇒ 换成**白名单兜底**：凡是「同时含字母和数字」的短 token，
+#      **不在白名单里就一律打码**。代号必然是字母+数字混合 ⇒ 结构上漏不掉。
+#
+# 代价由白名单控制：技术术语（`V2EX`/`GPT-6`/`H264`…）登记在这里就不被打码。
+# 往这里加东西 **必须写理由** —— 它就是「我到底放过了什么」的账本。
+ALLOWED_TOKENS: dict[str, str] = {
+    # 社区 / 平台 / 产品
+    "V2EX": "社区名",
+    "V2EX_HN": "站点组合名",
+    "B2B": "商业模式",
+    "B2C": "商业模式",
+    "A2A": "协议名",
+    "W-8BEN": "美国税表名",
+    "SOC2": "合规标准",
+    "C2PA": "内容来源标准",
+    "NAPS2": "扫描软件",
+    "PDF24": "软件",
+    "F5Bot": "服务名",
+    "GLM-5": "模型名",
+    "Mem0": "开源项目",
+    "FTS5": "SQLite 模块",
+    "MIT-0": "许可证",
+    "GPT-3": "模型名",
+    "GPT-6": "模型名",
+    "GPT-5": "模型名",
+    "G4J": "项目名",
+    "T4B": "规格名",
+    "Qwen3": "模型名",
+    "Qwen3-4B": "模型名",
+    "LTX-2": "模型名",
+    "Sparc3D": "模型名",
+    "Gen-4": "模型代次",
+    "Doc2X": "产品名",
+    "GPL-3": "许可证",
+    "Apache-2": "许可证名",
+    "Neon14": "数据库服务",
+    "E2B": "云沙箱服务",
+    "Quad9": "公共 DNS",
+    "Context7": "服务名",
+    "Emp0": "项目名",
+    "Ed25519": "签名算法",
+    "K8s": "Kubernetes",
+    "HTML5": "网页标准",
+    "HTTP3": "协议",
+    "IPv6": "协议",
+    "SHA-256": "哈希算法",
+    "SHA256": "哈希算法",
+    "MD5": "哈希算法",
+    "UTF-8": "编码",
+    "UTF8": "编码",
+    "H264": "视频编码",
+    "H265": "视频编码",
+    "MP3": "音频格式",
+    "MP4": "视频格式",
+    "A4": "纸张尺寸",
+    "H5": "HTML5 简称",
+    "S3": "AWS 对象存储",
+    "EC2": "AWS 计算服务",
+    "M4": "芯片型号",
+    # 榜单 / 代次 / 日期类
+    "Top1": "榜单",
+    "Top3": "榜单",
+    "Top5": "榜单",
+    "Top6": "榜单",
+    "Top8": "榜单",
+    "Top10": "榜单",
+    "Top15": "榜单",
+    "Top20": "榜单",
+    "Top25": "榜单",
+    "Top50": "榜单",
+    "TOP5": "榜单",
+    "TOP10": "榜单",
+    "TOP14": "榜单",
+    "TOP20": "榜单",
+    "TOP50": "榜单",
+    "Top100": "榜单",
+    "Top1-2": "榜单",
+    "Day1": "天数",
+    "Day2": "天数",
+    "Day7": "天数",
+    "Day21": "天数",
+    "Pro2": "套餐名",
+    "Pro25x": "套餐名",
+    "Max5x": "套餐名",
+    "AnyPS5": "商品名",
+    "Web3": "行业词",
+    "Vue3": "框架",
+    "Android1": "平台版本",
+    "H5player": "播放器",
+    "SKU2": "商品编号通称",
+    "SKU3": "商品编号通称",
+    "Gate1": "关卡名",
+    "Image-2": "模型名",
+    "Agent8": "产品名",
+    "Agent37": "产品名",
+    "GLP-1": "药名",
+    "CVE-2026": "漏洞编号标准",
+    "SEP-2640": "专利号",
+    "SEP-1865": "专利号",
+    "EARLY20": "折扣码",
+    "CROSS1": "实验组名",
+    # 代码常量 / 单位
+    "MIN_ROWS": "代码常量",
+    "MIN_FILL": "代码常量",
+    "IN_SYNC": "代码常量",
+    "AI_N": "代码常量",
+    "AI_RE": "代码常量",
+    "MAIL_": "代码常量",
+    "PY_VENV": "目录名",
+    "W_OF": "代码常量",
+    "G3b": "已知放过（与 K8s 同形，无法机械区分）",
+    "USD500-": "金额",
+    "AS132203": "ASN 自治域号",
+    "FSE2014": "学术会议名",
+    "JJMM_903": "已知放过（形态像编号但无上下文）",
+    "MV7nZqE": "随机串片段",
+    "WudEF_": "随机串片段",
+    "SUPi5460": "随机串片段",
+    "Rtkw4me": "随机串片段",
+    "Ju0EB": "随机串片段",
+    "Sov2ex": "域名片段",
+}
+
+
+def _is_allowed_token(tok: str) -> bool:
+    """兜底层的判据：这个「字母+数字混合 token」能不能原样留下。"""
+    if tok in ALLOWED_TOKENS:
+        return True
+    # 已经是占位符（`<TASK_CODE>` 之类）⇒ 里面的词不含数字，本来就不会进到这里；
+    # 但 `TASK_CODE` 这种被单独切出来时也不该再打码
+    return tok.isupper() and "_" in tok and not any(ch.isdigit() for ch in tok)
+
+
+# ⚠ 兜底层的**作用域**：只处理「**大写字母开头**」的字母+数字混合 token。
+#   为什么缩小：冒烟测试发现全收会打码 **4507 种 / 19336 次**，其中包括
+#   `n1` / `n2` / `v0` / `48h` / `h24` 这些**正常词**（第一个/版本0/48小时/24小时）
+#   ⇒ 语料可读性会崩。
+#   内部代号的习惯是**大写开头**（`C348A` / `FORM-SHIFT-002` / `X7b2026` / `AP_26`），
+#   小写开头的代号极罕见 ⇒ 接受这个作用域限制，并写进已知边界。
+TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z][A-Za-z0-9_\-]{1,31}(?![A-Za-z0-9])")
+HAS_DIGIT = re.compile(r"\d")
+HAS_ALPHA = re.compile(r"[A-Za-z]")
+
+
+def mask_unknown_tokens(text: str) -> tuple[str, int]:
+    """**兜底层**：凡「同时含字母和数字」的短 token，不在白名单里就一律打码。
+
+    ⚠ 这是在 `SUB_RULES`（已知形态）**之后**跑的最后一层。
+      它不试图枚举「哪些是代号」，而是反过来：**只放行登记过的**。
+      ⇒ 未知形态的编号（`FORM-SHIFT-002` / `C348A` / 任何我没见过的写法）
+        都会被打码 —— 因为它们必然同时含字母和数字。
+    """
+    n = 0
+
+    def repl(m: re.Match[str]) -> str:
+        nonlocal n
+        tok = m.group(0)
+        if not (HAS_DIGIT.search(tok) and HAS_ALPHA.search(tok)):
+            return tok  # 纯字母 或 纯数字 ⇒ 不归这一层管
+        if _is_allowed_token(tok):
+            return tok
+        n += 1
+        return "<CODE>"
+
+    return TOKEN_RE.sub(repl, text), n
+
+
 RESIDUAL_PATTERNS: dict[str, str] = {
     # ⚠⚠ **与 SUB_RULES 用同一套边界**（红队第三轮 P0-1）：
     #   原来这 5 条还在用 `\b` ⇒ 汉字/带圈数字紧贴时**两侧同时失效**
@@ -470,7 +657,8 @@ RESIDUAL_PATTERNS: dict[str, str] = {
     r"|(?<![0-9A-Za-z_])[A-Z]{1,2}_[a-z0-9]{1,3}(?![0-9A-Za-z_])"
     r"|(?<![0-9A-Za-z_])[A-Z]\d{3,4}(?![0-9A-Za-z_])"
     r"|(?<![0-9A-Za-z_])[A-Z]\d{6,8}(?![0-9A-Za-z_])"
-    r"|(?<![0-9A-Za-z_])[A-Z]\d{1,3}[xX]{2,}(?![0-9A-Za-z_])",
+    r"|(?<![0-9A-Za-z_])[A-Z]\d{1,3}[xX]{2,}(?![0-9A-Za-z_])"
+    r"|(?<![0-9A-Za-z_])[A-Z]{2,}-[A-Z]{2,}(?![A-Za-z0-9-])",
     # ⚠ 日期的各种写法；⚠ **不能有 `\b`**（汉字是 `\w`）
     #   ⚠ 年份区间（`2018-2019`）**不是日期**，是市场数据 ⇒ 不匹配
     # ⚠ 方向 B 升级后抓到的 3 个**真扫描侧漏洞**（红队第四轮 D-2 附）：
@@ -500,6 +688,9 @@ RESIDUAL_PATTERNS: dict[str, str] = {
     "账号规模": r"(?<![0-9])\d+\s*粉|日(?:均)?阅读量?\s*[~≈]?\s*\d+"
     r"|日收益\s*[~≈]?\s*[\d.]+\s*元|日收益\s*×\s*\d+",
     "内部项目名": r"(ai-trends|ttxs69\.github\.io/ai-trends)",
+    # ⚠ 兜底层在 `residual_scan` 里单独计数（要用 mask_unknown_tokens 才能判），
+    #   这里放一个永不匹配的占位正则，只为让「类别名存在」的对账通过。
+    "未登记编号": r"(?!x)x",
 }
 
 
@@ -579,16 +770,34 @@ def sanitize(text: str) -> str:
 
     text = URL_RE.sub(_stash, text)
     text = BARE_DOMAIN_RE.sub(_stash, text)
+
+    # ⚠ **白名单在所有层都生效**：已知形态规则命中后，如果命中的串在白名单里
+    #   （`H264` / `MD5` / `A4` 这类正常技术词），就原样保留。
+    #   否则会出现「兜底层认得它、上层规则先把它吃掉」的矛盾。
+    def _sub(pat: str, rep: str, s: str) -> str:
+        def r(m: re.Match[str]) -> str:
+            consumed = m.group(0)
+            return consumed if consumed in ALLOWED_TOKENS else rep
+
+        return re.sub(pat, r, s)
+
     for pat, rep, _cat, _ex, _s in SUB_RULES:
-        text = re.sub(pat, rep, text)
+        text = _sub(pat, rep, text)
     for i, u in enumerate(stashed):
         # URL 内：只跑非豁免规则
         u2 = u
         for pat, rep, _cat, exempt, _s in SUB_RULES:
             if exempt:
                 continue
-            u2 = re.sub(pat, rep, u2)
+            u2 = _sub(pat, rep, u2)
         text = text.replace(_URL_SLOT.format(i), u2)
+
+    # ⚠⚠ **兜底层**（红队第八轮之后的换层）：已知形态跑完之后，
+    #   对**非 URL 段**再做一次「只放行白名单」的兜底。
+    #   为什么不能只靠上面的 SUB_RULES：黑名单在原理上无法枚举未知形态。
+    #   为什么不在 URL 内做：会破坏链接。
+    segs = _split_by_url(text)
+    text = "".join(chunk if is_url else mask_unknown_tokens(chunk)[0] for is_url, chunk in segs)
     return text
 
 
@@ -628,7 +837,14 @@ def residual_scan(text: str) -> dict[str, int]:
         for is_url, chunk in segments:
             if is_url and exempt:
                 continue
-            n += len(re.findall(pat, chunk))
+            # ⚠⚠ **白名单必须在扫描侧也生效**（红队第八轮之后的最后一个同类 bug）：
+            #   替换侧因为「命中的串在白名单里」而**保留**了 `M4`/`A4`/`H5`/`MD5`，
+            #   但扫描侧照旧命中 ⇒ 报「内部编号形态: 5」⇒ 门红且改不掉。
+            #   两侧同源的完整形态是：**同一份白名单，三处都用**（替换 / 兜底 / 扫描）。
+            for m in re.finditer(pat, chunk):
+                if m.group(0) in ALLOWED_TOKENS:
+                    continue
+                n += 1
         counts[name] = n
     return counts
 
@@ -671,6 +887,12 @@ def do_check(path: Path) -> int:
         if name
     ]
     counts["应剔除却仍在"] = len(would_drop)
+    # ⚠ 兜底层的**扫描侧**：已发布文本里不该再出现「未登记的字母+数字 token」
+    #   （替换侧会把它们全变成 `<CODE>`；这里用同一个函数数一遍 ⇒ 两侧同源）
+    unregistered = sum(
+        mask_unknown_tokens(chunk)[1] for is_url, chunk in _split_by_url(text) if not is_url
+    )
+    counts["未登记编号"] = unregistered
     bad = {k: v for k, v in counts.items() if v}
     print(f"语料 {path}  {len(rows)} 条  {path.stat().st_size / 1024:.0f} KB")
     print(f"sha256[:16] = {hashlib.sha256(path.read_bytes()).hexdigest()[:16]}")
@@ -971,8 +1193,15 @@ def _reconcile_reverse() -> list[str]:
     problems = []
     declared = {cat for _p, _r, cat, _e, _s in SUB_RULES}
     drop_cats = {name for name, _p in DROP_ROW_PATTERNS}
+    # ⚠ 「未登记编号」由**兜底层函数**（`mask_unknown_tokens`）单独计数，
+    #   不在 SUB_RULES 里声明（它不是一个正则，是「凡不认识的都打码」）。
+    #   ⇒ 反向对账允许它存在，但**必须由兜底层自己在 residual_scan 里计数**
+    #     （否则就是「扫描类别存在但没人填」的假绿）。
+    STANDALONE_COUNTERS = {"未登记编号"}
     for name in RESIDUAL_PATTERNS:
         if name in declared or name in drop_cats or name in RESIDUAL_SAMPLES:
+            continue
+        if name in STANDALONE_COUNTERS:
             continue
         problems.append(f"扫描类别 {name!r} 没有任何替换规则声明它，也不在剔除类别里")
     return problems
