@@ -80,7 +80,7 @@ The hook was, in practice, mostly switched off.
 | E5 | `demo1-replay.sh` 读私有 scratch 路径、讲已撤回的旧口径、与 `demo-all.sh` 数字打架 | **撤下**（`demo-all.sh` 已覆盖全部内容，且用仓内脱敏语料） |
 | E6 | 口径更正只在工作区，GitHub 上仍是旧的 510/33/43 | 与其它产物**同一个 commit** |
 
-**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `4450c68599530302`）**：
+**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `db65462f2fafc98f`）**：
 
 | | before | after |
 |---|---|---|
@@ -98,7 +98,7 @@ The hook was, in practice, mostly switched off.
 打印语料 sha256 —— **任一不一致就 exit 78**。
 
 **⚠ 数字口径会随语料漂移**：本表所有数字绑定
-`sha256[:16] = 4450c68599530302`。语料一改必须重跑
+`sha256[:16] = db65462f2fafc98f`。语料一改必须重跑
 `verify_claims.py` 并同步本表。
 
 ### The guard moved into the nudge text

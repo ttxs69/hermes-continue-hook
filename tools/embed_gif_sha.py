@@ -41,6 +41,19 @@ FIXTURE = ROOT / "tests" / "fixtures" / "real_turns.jsonl"
 COMMENT_MARK = b"\x21\xfe"
 
 
+def frame_count(data: bytes) -> int:
+    """从字节流数图像描述符（0x2C）—— 用来断言「嵌入没破坏帧结构」。"""
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as im:
+            return getattr(im, "n_frames", 1)
+    except Exception:
+        return -1
+
+
 def _after_screen_descriptor(data: bytes) -> int:
     """返回「逻辑屏幕描述符（+ 全局调色板）之后」的偏移 = 可以插块的位置。"""
     if data[:6] not in (b"GIF87a", b"GIF89a"):
@@ -52,33 +65,65 @@ def _after_screen_descriptor(data: bytes) -> int:
     return 13 + gct
 
 
+def iter_blocks(data: bytes):
+    """**真正的 GIF 块解析器**：按块走，不按字节找。
+
+    ⚠ 第六轮红队抓到的真 bug：上一版是 `while` 里逐字节找 `0x21 0xFE`，
+      碰巧图形控制扩展（GCE）的**延时字节**是 `0xFE21` 时，就会从延时的高字节
+      开始「找到」一个假 comment 起点，然后按子块长度跳 ⇒ **静默删掉 3 个字节**，
+      实测把 **3 帧的 GIF 变成 2 帧，而 CLI 仍然打印 ✅ exit 0**
+      （因为它读回只验 comment，不验帧数）。
+    ⇒ 正确做法是从逻辑屏幕描述符之后开始**逐块解析**：
+      0x21 = 扩展（下一个字节是标签），0x2C = 图像描述符，0x3B = 文件结束。
+      只有标签为 0xFE 的扩展才是 comment。
+
+    yield (kind, start, end)；kind ∈ {"comment", "other"}；解析到第一张图像就停。
+    """
+    pos = _after_screen_descriptor(data)
+    n = len(data)
+    while pos < n:
+        b = data[pos]
+        if b == 0x3B:  # trailer
+            return
+        if b == 0x2C:  # 图像描述符之后的内容一律不动
+            return
+        if b != 0x21:
+            # 不该出现的字节：保守停手（不猜）
+            return
+        if pos + 1 >= n:
+            return
+        label = data[pos + 1]
+        start = pos
+        pos += 2
+        if label == 0xF9 and pos < n:
+            # GCE：块大小 + 数据 + 终止符（大小是自描述的，不猜）
+            size = data[pos]
+            pos += 1 + size
+            if pos < n and data[pos] == 0x00:
+                pos += 1
+        else:
+            # 其余扩展（含 comment 0xFE、应用 0xFF 等）都是「长度 + 数据」子块串
+            while pos < n and data[pos] != 0x00:
+                pos += 1 + data[pos]
+            pos += 1  # 跳过终止 0x00
+        if label == 0xFE:
+            yield ("comment", start, min(pos, n))
+
+
 def strip_comments(data: bytes) -> bytes:
     """剥掉已有的 comment extension 块（幂等：重复嵌入不会越积越多）。
 
-    只在**顶层块流**里剥：图像数据块前面的那些 `0x21 0xFE ... 0x00`。
-    碰到第一个图像描述符（0x2C）就停 —— 之后的字节一律不动。
+    ⚠ **只剥 comment**，其他块原样保留；解析到第一张图像描述符就停手。
     """
-    pos = _after_screen_descriptor(data)
-    out = bytearray(data[:pos])
-    i = pos
-    n = len(data)
-    while i < n:
-        b = data[i]
-        if b == 0x2C:  # 图像描述符：后面全不动
-            out += data[i:]
-            return bytes(out)
-        if data[i : i + 2] == COMMENT_MARK:
-            j = i + 2
-            while j < n and data[j] != 0x00:  # 子块：长度字节 + 数据
-                j += 1 + data[j]
-            out += data[j + 1 : j + 1]  # 跳过终止 0x00
-            i = j + 1
-            continue
-        if b == 0x3B:  # trailer
-            out += data[i:]
-            return bytes(out)
-        out.append(b)
-        i += 1
+    prune = [(s, e) for kind, s, e in iter_blocks(data) if kind == "comment"]
+    if not prune:
+        return data
+    out = bytearray()
+    last = 0
+    for s, e in prune:
+        out += data[last:s]
+        last = e
+    out += data[last:]
     return bytes(out)
 
 
@@ -100,11 +145,23 @@ def main() -> int:
     args = ap.parse_args()
     sha = args.sha or hashlib.sha256(FIXTURE.read_bytes()).hexdigest()[:16]
     before = args.gif.stat().st_size
+    before_bytes = args.gif.read_bytes()
     embed(args.gif, sha)
     after = args.gif.stat().st_size
 
     # 立刻读回来验证（不信任自己写的）
     from PIL import Image
+
+    # ⚠ 第六轮：**帧数必须不变**（上一版把 3 帧改成 2 帧还报 ✅）
+    before_frames = frame_count(before_bytes)
+    with Image.open(args.gif) as im:
+        after_frames = getattr(im, "n_frames", 1)
+    if before_frames != after_frames:
+        print(
+            f"❌ 帧数变了：{before_frames} → {after_frames}（嵌 comment 破坏了文件）",
+            file=sys.stderr,
+        )
+        return 78
 
     got = (Image.open(args.gif).info or {}).get("comment")
     got = got.decode("ascii", "replace") if isinstance(got, bytes) else got
