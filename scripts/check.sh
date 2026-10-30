@@ -75,5 +75,20 @@ python3 scripts/check_published_sha.py
 #   红队的原话：「不在 CI 里的门就不是门」（我自己写在 CI 注释里的那句话）。
 #   ⇒ 现在所有门都必须出现在这里；新增门时**必须**同时加进本文件与 CI 的 corpus-gate。
 python3 tools/coverage_check.py --self-test
+# ⚠⚠ 红队第十二轮：`rebuild_published.py --check` **连续三轮**（第十/十一/十二）
+#   被点名「没接线」—— 我在 commit message 里写"接上了"，实际两边都零命中。
+#   ⇒ 它校验「文档 sha / 生成块 == 生成器当前产出」，不跑它 ⇒ 生成器改了、
+#     文档没重建，本地和 CI 都全绿。
+python3 tools/rebuild_published.py --check
 python3 tools/check_docs_consistency.py
+
+# ⚠ CI 的 corpus-gate 里有、而本文件原来**没有**的四步：
+#   sanitize --self-test / sanitize --check / verify_claims / rebuild --check。
+#   「CI 有的本地没有」= 推上去才发现红，本地永远绿 ⇒ 必须让本文件 ⊇ CI。
+echo "== corpus: redaction rules still hold (self-test)"
+python3 tools/sanitize_corpus.py --self-test
+echo "== corpus: published corpus has no residue"
+python3 tools/sanitize_corpus.py --check tests/fixtures/real_turns.jsonl
+echo "== corpus: three scripts agree"
+python3 scripts/verify_claims.py
 echo "all checks passed"
