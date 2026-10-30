@@ -185,6 +185,44 @@ jobs:
       - name: Run the dsh plugin against a mock harness
         run: npx vitest run tests/test_dsh.test.mjs
 
+  corpus-gate:
+    name: corpus gate (redaction + independent recomputation)
+    runs-on: ubuntu-latest
+    # ⭐ 这道门以前**只靠人记得手动跑** —— 红队第二轮 N10 点名的失效链：
+    #   「发布前最后一道门」如果不在 CI 里，它就不是门。
+    #   ⇒ 语料被误改 / 脱敏规则被改坏 / 三个脚本开始互相矛盾 ⇒ CI 必须红。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Redaction rules still hold (self-test)
+        run: python3 tools/sanitize_corpus.py --self-test
+      - name: The published corpus has no residue (22+ classes)
+        run: python3 tools/sanitize_corpus.py --check tests/fixtures/real_turns.jsonl
+      - name: Three scripts agree (cross-check + hard red line)
+        run: python3 scripts/verify_claims.py
+      - name: The published corpus is a fixed point of the generator
+        run: |
+          set -euo pipefail
+          # The published corpus must be a **fixed point** of the generator:
+          # re-running the generator on it must reproduce it byte-for-byte.
+          #
+          # Why a fixed point and not "regenerate from the raw corpus":
+          # the raw corpus is the author's private conversation history and
+          # cannot live in this repo. A fixed point gives CI the same
+          # guarantee without it — "what is published is what the generator
+          # produces" holds for *any* input.
+          python3 tools/sanitize_corpus.py --in tests/fixtures/real_turns.jsonl \
+            --out /tmp/regen.jsonl > /tmp/regen.log
+          if ! cmp -s tests/fixtures/real_turns.jsonl /tmp/regen.jsonl; then
+            echo "::error::the published corpus is not a fixed point of the generator"
+            diff <(head -c 400 tests/fixtures/real_turns.jsonl) \
+                 <(head -c 400 /tmp/regen.jsonl) || true
+            exit 1
+          fi
+          echo "corpus is a fixed point: $(sha256sum tests/fixtures/real_turns.jsonl | cut -c1-16)"
+
   package:
     name: npm package contents
     runs-on: ubuntu-latest

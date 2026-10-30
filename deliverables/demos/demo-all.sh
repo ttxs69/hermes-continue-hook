@@ -60,6 +60,20 @@ j=json.load(sys.stdin)
 print(j['corpus_size'], j['nudged'], j['old']['boundary_released'], j['old']['truly_missed'])
 " 2>/dev/null || echo "0 0 0 0"
 )
+# ⚠⚠ 宿主侧的数也必须插值（红队第二轮 N4）：
+#   原来「9 个 adapter」「84 项」「1420 行」「285 行」全是写死的
+#   ⇒ 给 adapters/codex 加 100 行，脚本输出 1520 而总结段仍写 1420
+#   ⇒ **屏幕上两套数字并存**（与 E2 同型的失败，只是漏了 demo 脚本本身）。
+read -r H_ADAPTERS H_ROUTED H_LINES H_SHARED H_CONTRACT < <(
+  python3 scripts/check_hosts.py --json 2>/dev/null | python3 -c "
+import json,sys
+j=json.load(sys.stdin)
+ct = j.get('contract_tests', {})
+print(j['adapters'], j['routed_to_canonical'],
+      j['adapter_layer_lines']['total'], j['adapter_layer_lines']['shared_module_lines'],
+      sum(int(v.get('ran') or 0) for v in ct.values()))
+" 2>/dev/null || echo "0 0 0 0 0"
+)
 
 FRAME
 sub "Demo 1 ·「你怎么知道你的判断是对的」"
@@ -73,7 +87,7 @@ python3 scripts/replay_regression.py || echo "  [demo2 失败 exit=$?]"
 
 FRAME
 sub "Demo 3 ·「10 个宿主，你怎么保证规则一致」"
-echo "  → 9 个 adapter 全路由到同一入口 + 84 项契约测试（第 10 个是 Hermes 本仓 core patch mode）"
+echo "  → $H_ADAPTERS 个 adapter（$H_ROUTED/$H_ADAPTERS 全路由到同一入口）+ $H_CONTRACT 项契约测试（第 10 个是 Hermes 本仓 core patch mode）"
 python3 scripts/check_hosts.py || echo "  [demo3 失败 exit=$?]"
 
 FRAME
@@ -100,7 +114,7 @@ cat <<EOF
      因为词表判断的是『tail 里有没有这个词』，
      而语义是『这一条在请求不可逆动作』，这是两件事。」
 
-  3「10 个 enforce 宿主、1 份 detector、薄适配层 1420 行（含共享模块 285 行）。
+  3「10 个 enforce 宿主、1 份 detector、薄适配层 $H_LINES 行（含共享模块 $H_SHARED 行）。
      历史上我手写过第二份 patch 实现，跟插件版漂移了，
      机器上同时跑两套却没人发现 —— 后来改成共享引擎生成，
      『规则只有一处』现在是可以验的，不是口号。」
