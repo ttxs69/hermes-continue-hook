@@ -153,6 +153,39 @@ class TestGate(unittest.TestCase):
         gif.write_bytes(data[:pos] + b"\x3b")
         self.assertEqual(self._gate().returncode, 78)
 
+    def test_red_when_generator_changes_without_rebuild(self) -> None:
+        """红队第九轮 B3：改了生成器、只手工改文档 sha，发布物就不是生成器的输出了。
+
+        ⇒ PROVENANCE 记了生成器指纹，改了不重建 ⇒ 红。
+
+        ⚠ 这个用例在**工作区**上做（备份/恢复生成器），不能放在 clone 里 ——
+          PROVENANCE.json 是新增文件，clone（只含已提交内容）里可能没有，
+          那样测的是「缺文件」而不是「指纹不匹配」。
+        """
+
+        gen = ROOT / "tools" / "sanitize_corpus.py"
+        orig = gen.read_bytes()
+        try:
+            gen.write_bytes(orig + b"\n# tmp\n")
+            r = subprocess.run(
+                [sys.executable, "scripts/check_published_sha.py"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(r.returncode, 78, r.stdout + r.stderr)
+            self.assertIn("生成器变了", r.stdout + r.stderr)
+        finally:
+            gen.write_bytes(orig)
+        # 恢复后必须重新变绿
+        r2 = subprocess.run(
+            [sys.executable, "scripts/check_published_sha.py"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+
     def test_red_when_corpus_changes(self) -> None:
         f = self.repo / "tests" / "fixtures" / "real_turns.jsonl"
         f.write_bytes(f.read_bytes() + b'\n{"id": 9999, "text": "x"}\n')

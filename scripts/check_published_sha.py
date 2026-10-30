@@ -50,6 +50,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "real_turns.jsonl"
+PROVENANCE = ROOT / "tests" / "fixtures" / "PROVENANCE.json"
+GENERATOR = ROOT / "tools" / "sanitize_corpus.py"
 GIF = ROOT / "deliverables" / "demos" / "demo-all.gif"
 
 # 会印给外人看的文档（CHANGELOG 里的历史叙述不归这道门管）
@@ -101,6 +103,34 @@ def gif_sha() -> tuple[str | None, str]:
     return sha, ""
 
 
+def check_provenance(sha: str) -> list[str]:
+    """**发布物必须是当前生成器的输出**（红队第九轮 B3 的根治）。
+
+    第九轮抓到的：发布语料 sha `8792cf49…`，但**当前生成器**从同一原始语料产出
+    `13d627ac…`（720/1341 行不同）。原因是我改了生成器、只手工改了文档里的 sha 字面量，
+    没重跑生成器 —— 而**不动点只验 `f(已发布)=已发布`，对「生成器本身变了」结构性失明**。
+
+    ⇒ `rebuild_published.py` 把**生成器指纹**记进 PROVENANCE；这里比对：
+      生成器变了但没重建 ⇒ 红。
+    """
+    if not PROVENANCE.exists():
+        return ["缺少 tests/fixtures/PROVENANCE.json ⇒ 跑 tools/rebuild_published.py"]
+    import hashlib
+    import json
+
+    prov = json.loads(PROVENANCE.read_text(encoding="utf-8"))
+    gen_now = hashlib.sha256(GENERATOR.read_bytes()).hexdigest()[:16]
+    bad = []
+    if prov.get("generator_sha16") != gen_now:
+        bad.append(
+            f"生成器变了（PROVENANCE 记 {prov.get('generator_sha16')}，当前 {gen_now}）"
+            f" ⇒ 改了脱敏规则但没重建发布物（跑 tools/rebuild_published.py）"
+        )
+    if prov.get("fixture_sha16") != sha:
+        bad.append(f"发布语料 {sha} 与 PROVENANCE 记的 {prov.get('fixture_sha16')} 不一致")
+    return bad
+
+
 def check_docs(sha: str) -> list[str]:
     bad: list[str] = []
     for rel in ARTIFACTS:
@@ -136,7 +166,7 @@ def main() -> int:
         return 0
 
     sha = current_sha()
-    bad = check_docs(sha)
+    bad = check_provenance(sha) + check_docs(sha)
     if args.allow_missing and not GIF.exists():
         print("⚠ --allow-missing：GIF 还没生成，跳过")
     else:

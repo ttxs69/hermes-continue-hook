@@ -42,15 +42,35 @@ def _self_test() -> int:
     if no_reason:
         print(f"❌ 白名单里这些项没写理由: {no_reason}", file=sys.stderr)
         return 78
-    # 白名单项必须真的被保留（否则说明三处没同源）
-    kept = [k for k in sc.ALLOWED_TOKENS if sc.sanitize(k) != k]
-    if kept:
+    # 白名单里不许有 PII 形态（防「加一行就永久豁免邮箱」的后门）
+    pii = [k for k in sc.ALLOWED_TOKENS if sc._looks_like_pii(k)]
+    if pii:
+        print(f"❌ 白名单里有 PII 形态的项: {pii}", file=sys.stderr)
+        return 78
+
+    # **三处同源**必须真的验三处（红队第九轮：原来只验两处，
+    #   删掉扫描侧判断后两个 self-test 仍然全绿）
+    #   ① 替换侧：sanitize(白名单项) == 白名单项
+    #   ② 兜底层：_is_allowed_token(白名单项) is True
+    #   ③ 扫描侧：对白名单项跑 residual_scan，不该报残留
+    bad_replace = [k for k in sc.ALLOWED_TOKENS if sc.sanitize(k) != k]
+    bad_fallback = [k for k in sc.ALLOWED_TOKENS if not sc._is_allowed_token(k)]
+    bad_scan = [
+        k for k in sc.ALLOWED_TOKENS if any(v for v in sc.residual_scan(sc.sanitize(k)).values())
+    ]
+    if bad_replace or bad_fallback or bad_scan:
         print(
-            f"❌ 这些项在白名单里，但 sanitize() 仍然改动了它们（三处不同源）: {kept[:10]}",
+            "❌ 白名单项在某一层没生效（三处不同源）：\n"
+            f"   替换侧: {bad_replace[:5]}\n"
+            f"   兜底层: {bad_fallback[:5]}\n"
+            f"   扫描侧: {bad_scan[:5]}",
             file=sys.stderr,
         )
         return 78
-    print(f"✅ 白名单 {len(sc.ALLOWED_TOKENS)} 项：无重复、有理由、三处同源")
+    print(
+        f"✅ 白名单 {len(sc.ALLOWED_TOKENS)} 项：无重复、有理由、无 PII、"
+        f"**三处（替换/兜底/扫描）都已验过**"
+    )
     return 0
 
 

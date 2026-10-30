@@ -562,6 +562,20 @@ ALLOWED_TOKENS: dict[str, str] = {
     "EARLY20": "折扣码",
     "CROSS1": "实验组名",
     # 代码常量 / 单位
+    "JSON-RPC": "协议名",
+    "JSON-LD": "标准名",
+    "XML-RPC": "协议名",
+    "HP-UX": "操作系统",
+    "CAN-SPAM": "法律名",
+    "OAuth2": "协议名",
+    "WebRTC": "协议名",
+    "TypeScript": "语言名",
+    "Node18": "运行时版本",
+    "Node20": "运行时版本",
+    "W3C": "标准组织",
+    "M1": "芯片型号",
+    "M2": "芯片型号",
+    "M3": "芯片型号",
     "MIN_ROWS": "代码常量",
     "MIN_FILL": "代码常量",
     "IN_SYNC": "代码常量",
@@ -584,8 +598,27 @@ ALLOWED_TOKENS: dict[str, str] = {
 }
 
 
+# 白名单**只在编号类规则上生效**（否则它就是一个能把邮箱永久豁免的后门）
+CODE_CATS = {"内部编号形态", "内部任务代号", "内部代号"}
+
+
+PII_SHAPES = [
+    re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]{2,}"),  # 邮箱
+    re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),  # 手机号
+    re.compile(r"(?:sk-|ghp_|gho_|github_pat_|AKIA|AIza)[A-Za-z0-9_\-]{8,}"),  # 密钥
+    re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])"),  # IP
+]
+
+
+def _looks_like_pii(tok: str) -> bool:
+    """白名单里**不许**出现 PII 形态的项（防「加一行就永久豁免邮箱」的后门）。"""
+    return any(p.fullmatch(tok) for p in PII_SHAPES)
+
+
 def _is_allowed_token(tok: str) -> bool:
     """兜底层的判据：这个「字母+数字混合 token」能不能原样留下。"""
+    if _looks_like_pii(tok):
+        return False  # 就算它在白名单里，PII 形态也一律打码
     if tok in ALLOWED_TOKENS:
         return True
     # 已经是占位符（`<TASK_CODE>` 之类）⇒ 里面的词不含数字，本来就不会进到这里；
@@ -599,9 +632,17 @@ def _is_allowed_token(tok: str) -> bool:
 #   ⇒ 语料可读性会崩。
 #   内部代号的习惯是**大写开头**（`C348A` / `FORM-SHIFT-002` / `X7b2026` / `AP_26`），
 #   小写开头的代号极罕见 ⇒ 接受这个作用域限制，并写进已知边界。
-TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z][A-Za-z0-9_\-]{1,31}(?![A-Za-z0-9])")
+# ⚠ 非 ASCII / 全角形态（红队第九轮：`代号348` / `Δ348` / `Ｃ348Ａ` / `C₃₄₈` 全穿过去）
+NON_ASCII_CODE_RE = re.compile(r"[^\x00-\x7f][\w\u2080-\u209c\u00b2\u00b3\u00b9]{1,31}")
+
+TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"(?:[A-Z][A-Za-z0-9_\-]{1,31}|[0-9][A-Za-z0-9_\-]{0,31})"
+    r"(?![A-Za-z0-9])"
+)
 HAS_DIGIT = re.compile(r"\d")
 HAS_ALPHA = re.compile(r"[A-Za-z]")
+HAS_UPPER = re.compile(r"[A-Z]")
 
 
 def mask_unknown_tokens(text: str) -> tuple[str, int]:
@@ -619,12 +660,38 @@ def mask_unknown_tokens(text: str) -> tuple[str, int]:
         tok = m.group(0)
         if not (HAS_DIGIT.search(tok) and HAS_ALPHA.search(tok)):
             return tok  # 纯字母 或 纯数字 ⇒ 不归这一层管
+        # ⚠ 数字开头（`348C`）也要兜，但**必须含大写字母**才动手：
+        #   否则 `48h` / `24h` / `720p` 这类正常写法会被打码。
+        if tok[0].isdigit() and not HAS_UPPER.search(tok):
+            return tok
         if _is_allowed_token(tok):
             return tok
         n += 1
         return "<CODE>"
 
-    return TOKEN_RE.sub(repl, text), n
+    text = TOKEN_RE.sub(repl, text)
+
+    # 非 ASCII / 全角形态：只处理「含数字」的
+    def repl2(m: re.Match[str]) -> str:
+        nonlocal n
+        tok = m.group(0)
+        # ⚠ 这条规则只处理**含非 ASCII 字符**的串 —— 否则它会把纯 ASCII 的
+        #   `W3C` / `M1` 也吃掉（实测过），而它们已经由上面的 TOKEN_RE 判过白名单了。
+        if not any(ord(ch) > 127 for ch in tok):
+            return tok
+        if not HAS_DIGIT.search(tok):
+            return tok
+        # ⚠ **中文 + 数字 一律不打码**（红队第九轮的反例 `代号348` 是它人造的样本，
+        #   而「这是正常中文3个字」「第一篇3」这类正常写法在语料里大量存在）。
+        #   ⇒ 这是**已知上限**：如果真出现「中文前缀+编号」的内部代号，这一层兜不住。
+        #   只有「希腊字母 / 全角字母 + 数字」才打码（`Δ348` / `Ｃ348Ａ`）。
+        if re.search(r"[\u4e00-\u9fff]", tok):
+            return tok
+        n += 1
+        return "<CODE>"
+
+    text = NON_ASCII_CODE_RE.sub(repl2, text)
+    return text, n
 
 
 RESIDUAL_PATTERNS: dict[str, str] = {
@@ -774,22 +841,28 @@ def sanitize(text: str) -> str:
     # ⚠ **白名单在所有层都生效**：已知形态规则命中后，如果命中的串在白名单里
     #   （`H264` / `MD5` / `A4` 这类正常技术词），就原样保留。
     #   否则会出现「兜底层认得它、上层规则先把它吃掉」的矛盾。
-    def _sub(pat: str, rep: str, s: str) -> str:
+    # ⚠⚠ 白名单**只对「编号形态」类规则生效**（红队第九轮的后门）：
+    #   如果白名单对所有规则生效，往 `ALLOWED_TOKENS` 加一行就能让某个**邮箱**
+    #   永久不被脱敏（实测：两个 self-test 全绿、`--check` 全绿、生成器 rc=0）。
+    #   ⇒ 现在白名单只在 `CODE_CATS`（编号相关的类别）里被查询。
+    def _sub(pat: str, rep: str, s: str, *, honor_allowlist: bool) -> str:
         def r(m: re.Match[str]) -> str:
             consumed = m.group(0)
-            return consumed if consumed in ALLOWED_TOKENS else rep
+            if honor_allowlist and consumed in ALLOWED_TOKENS:
+                return consumed
+            return rep
 
         return re.sub(pat, r, s)
 
-    for pat, rep, _cat, _ex, _s in SUB_RULES:
-        text = _sub(pat, rep, text)
+    for pat, rep, cat, _ex, _s in SUB_RULES:
+        text = _sub(pat, rep, text, honor_allowlist=cat in CODE_CATS)
     for i, u in enumerate(stashed):
         # URL 内：只跑非豁免规则
         u2 = u
         for pat, rep, _cat, exempt, _s in SUB_RULES:
             if exempt:
                 continue
-            u2 = _sub(pat, rep, u2)
+            u2 = _sub(pat, rep, u2, honor_allowlist=_cat in CODE_CATS)
         text = text.replace(_URL_SLOT.format(i), u2)
 
     # ⚠⚠ **兜底层**（红队第八轮之后的换层）：已知形态跑完之后，
