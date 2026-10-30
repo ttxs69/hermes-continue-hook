@@ -420,7 +420,7 @@ def main() -> int:
     #   （core patch mode，不走 adapters/）。
     #   ⇒ 不要写「9 个 adapter = 9 个宿主」。
     print("=" * 70)
-    print("  跨宿主一致性核验 —— 10 个 enforce 宿主，1 份规则")
+    print(f"  跨宿主一致性核验 —— {enforce} 个 enforce 宿主，{impl['independent_copies']} 份规则")
     print("=" * 70)
     print()
     print(f"  adapter 数: {n}（+ Hermes 本仓 core patch mode = {enforce} 个 enforce 宿主）")
