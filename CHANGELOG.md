@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1 (2026-10-30)
+
+公开发布前的收口：R311 独立红队审查结论「不放行」，6 项必做全部关闭。
+**核心变化 = 公开语料（脱敏 + 剔行）+ 三个脚本的结论数字改为实测值 + 三脚本交叉校验。**
+详见下方「1.5.1 — 公开前的收口」小节。
+
 ## 1.5.0 (2026-10-29)
 
 **The `boundary` word list is deleted.** The user never asked for it
@@ -18,7 +24,7 @@ Over **1430 real turn-final replies**:
 
 | | before | after |
 |---|---|---|
-| released by `boundary` | **510 (36%)** | **0** |
+| released early by `boundary` | **510 (36%)** | **0** |
 | actually nudged | 33 | **43** (+10 recovered) |
 | `user_must` releases | 9 | 24 (boundary no longer steals them) |
 
@@ -28,6 +34,68 @@ asking the user to authorise an irreversible action"; the implementation was
 "a boundary word appears somewhere in the tail". Two different things.
 
 The hook was, in practice, mostly switched off.
+
+> **⚠ 口径更正（2026-10-30，R311 红队指出）**
+>
+> 上表的 **510 / 33 / 43** 是**未裁剪的全量语料**口径。
+>
+> 后来为了把语料随仓库公开，做了**裁剪**（只留每条回复的最后 2 段 = 检测器
+> 实际判定的对象）+ **脱敏**。裁剪后的同一批语料给出：
+>
+> | | before | after |
+> |---|---|---|
+> | released early by `boundary` | **506 (35.4%)** | **0** |
+> | actually nudged | 31 | **42** (+11 recovered) |
+>
+> **⚠ 更重要的一点**：**「被提前放行 510 条」≠「误放行 510 条」。**
+> 逐条复核后：510（裁剪脱敏后 506）条里，**只有 10（裁剪脱敏后 11）条**在新版下
+> 真的该 nudge —— 其余 500（裁剪脱敏后 495）条**两版都放行**（本来就没有触发信号，
+> **不算误判**）。
+>
+> ⇒ **真正的误放行 = 11 条（0.8%）**，不是 506 条。
+> ⇒ 删表的价值**不是**「多抓了 11 条」，是 **506 条回复的放行理由**
+> 从「命中了词表」变成「没有触发信号」—— 判定不再依赖一个会误伤的结构。
+>
+> ⚠ **数字随语料变**：裁剪/脱敏/剔行规则一改，统计值就变
+> （实测：504 ↔ 506 ↔ 472）。
+> ⇒ **报数时必须带上语料 sha256**，复算用：
+> `python3 scripts/replay_regression.py`（同语料两版对比）、
+> `python3 scripts/verify_claims.py`（独立重写一遍再核对，含「不丢失」硬红线
+> + 三脚本交叉核对）。
+
+### 1.5.1 — 公开前的收口（2026-10-30，R311 红队审查后）
+
+发布前跑了独立红队审查，**结论是「不放行」**，列了 6 项必做。全部关闭：
+
+| # | 问题 | 修法 |
+|---|---|---|
+| E1 | `sid` 字段（会话 ID + 精确时间戳）、正文残留日期、20 个微信 `media_id` 未被扫描 | `sid` 整列删除；日期规则扩到 5 种写法；`media_id` 加规则；**残留扫描从 12 项扩到 22 项**（原来扫描器口径比 docstring 承诺的窄） |
+| E2 | 三个脚本把结论数字**写死成字面量**，语料一换就静默印出过期数字 | 全部改为**本次计算值**；每个脚本打印语料 sha256；`verify_claims.py` 加**三脚本交叉核对硬校验**（任一不一致 ⇒ exit 78） |
+| E3 | 127 行自曝经营底牌（冷发信 SOP / cron 时刻表 / 粉丝数 / 第三方网名 / 逐字转载原话） | 分两层：可替换的用占位符（公众号名→`<PUBLIC_ACCOUNT>`、粉丝数→`<FAN_COUNT>`、media_id→`<MEDIA_ID>`、第三方网名→`<THIRD_PARTY>` 等）；**不可替换的操作手册类整行剔除**（82 行） |
+| E4 | `check_hosts.py` 把 `implementation_copies: 1` 写成**字面量**；路由判据是**子串 grep**（一行注释就能绕过）；`enforce_hosts` 从目录数推算而非读 README；行数漏了 `adapters/_common.py` | ① 实现份数改为**实测**（扫仓库内 `def detect(` 定义 + `build-patch-mode.py --check` 验证 patch-mode 是生成物）② 路由判据改为**结构化匹配**（import/call/require/exec），**注释行不算** —— 红队的绕过手法现被识破 ③ enforce 数从 README 表解析并与 adapter 数交叉核对 ④ 行数口径改为「子目录 + 共享模块」= 1420（原口径 1135 漏了 `_common.py` 285 行） |
+| E5 | `demo1-replay.sh` 读私有 scratch 路径、讲已撤回的旧口径、与 `demo-all.sh` 数字打架 | **撤下**（`demo-all.sh` 已覆盖全部内容，且用仓内脱敏语料） |
+| E6 | 口径更正只在工作区，GitHub 上仍是旧的 510/33/43 | 与其它产物**同一个 commit** |
+
+**⇒ 当前口径（脱敏 + 剔行后，语料 1348 条，sha256[:16] = `b8068ccb0cef0cf2`）**：
+
+| | before | after |
+|---|---|---|
+| released early by `boundary` | **472 (35.0%)** | **0** |
+| actually nudged | 30 | **40** (+10 recovered) |
+
+**真正的误放行 = 10 条（0.7%）**，不是 472 条 —— 其余 462 条两版都放行
+（本来就没有触发信号，**不算误判**）。
+
+⇒ 删表的价值**不是**「多抓了 10 条」，是 **472 条回复的放行理由**
+从「命中了词表」变成「没有触发信号」。
+
+**⚠ 三个脚本现在互为交叉验证**：`replay_real.py` / `replay_regression.py` /
+`verify_claims.py` 各自独立实现，`verify_claims.py` 会比对三者的每一个数并
+打印语料 sha256 —— **任一不一致就 exit 78**。
+
+**⚠ 数字口径会随语料漂移**：本表所有数字绑定
+`sha256[:16] = b8068ccb0cef0cf2`。语料一改必须重跑
+`verify_claims.py` 并同步本表。
 
 ### The guard moved into the nudge text
 
