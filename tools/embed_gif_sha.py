@@ -14,10 +14,14 @@
 2. **该红不红（假绿）**：门只读回执文本 + mtime，**从不读 GIF** ⇒ 把 GIF 换成
    0 字节、或换回上一轮的 GIF（帧里印着旧 sha），再手写回执，它照样打印 ✅。
 
-⇒ 唯一能同时解决两头的做法：**证据必须长在产物里**。
-   GIF89a 允许任意 comment extension 块（`0x21 0xFE <len> <data> 0x00`），
-   PIL 会把它读成 `info['comment']`。
-   写它就必须改 GIF 的字节 ⇒ **手写回执这条路不存在**。
+⇒ 修法：把 sha 写进 GIF 本身（GIF89a comment extension 块
+   `0x21 0xFE <len> <data> 0x00`，PIL 读成 `info['comment']`）。
+
+   ⚠⚠ **但这只是把「旁路文本」换成「产物内的字节」，不是存证**（红队第六/七轮）：
+   它是**流程门**。证明的命题只有「有人把这 16 个字符写进了这个 GIF」，
+   **不**证明画面是用当前语料录的 —— 拿旧 GIF 只跑本脚本、或用 PIL 造张黑图嵌上 sha，
+   门都会绿。我第六轮写过的「手写文本这条路不存在 / 换 GIF 就换掉了证据」**是错的**，
+   已在这里改正。
 
 ## 为什么不用「PIL 重新保存」
 
@@ -139,11 +143,24 @@ def embed(path: Path, sha: str) -> None:
 
 
 def main() -> int:
+    from PIL import Image
+
     ap = argparse.ArgumentParser(description="把语料 sha 写进 GIF 的 comment 块")
     ap.add_argument("gif", type=Path)
     ap.add_argument("--sha", default=None, help="默认取当前语料 sha256[:16]")
     args = ap.parse_args()
     sha = args.sha or hashlib.sha256(FIXTURE.read_bytes()).hexdigest()[:16]
+    if not args.gif.exists():
+        print(f"❌ 没有这个文件：{args.gif}", file=sys.stderr)
+        return 78
+    # ⚠ 红队第七轮：文件被弄坏时原来是 traceback（exit 1），走不到 `❌ 78` ——
+    #   fail-loud 但不体面。⇒ 统一成 78。
+    try:
+        with Image.open(args.gif) as _probe:
+            getattr(_probe, "n_frames", 1)
+    except Exception as e:
+        print(f"❌ 不是可读的 GIF（{type(e).__name__}）⇒ 不嵌入", file=sys.stderr)
+        return 78
     before = args.gif.stat().st_size
     before_bytes = args.gif.read_bytes()
     embed(args.gif, sha)

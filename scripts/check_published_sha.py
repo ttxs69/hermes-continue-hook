@@ -72,6 +72,16 @@ def gif_sha() -> tuple[str | None, str]:
         info = Image.open(GIF).info or {}
     except Exception as e:  # 0 字节 / 截断 / 不是 GIF
         return None, f"GIF 读不出来（{type(e).__name__}）⇒ 它不可能是用当前语料录的"
+    # ⚠ 红队第七轮：**截断到 50 KB（comment 在文件头）门仍然绿** ——
+    #   因为它只读 comment，不验文件完整性。⇒ 现在要求「所有帧都能解出来」。
+    try:
+        from PIL import ImageSequence
+
+        n = sum(1 for _ in ImageSequence.Iterator(Image.open(GIF)))
+    except Exception as e:
+        return None, f"GIF 解不完整（{type(e).__name__}）⇒ 文件被截断或损坏"
+    if n < 2:
+        return None, f"GIF 只有 {n} 帧 ⇒ 不可能是 demo 录屏（被截断/替换了）"
     raw = info.get("comment")
     if not raw:
         return (

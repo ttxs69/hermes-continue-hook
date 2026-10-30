@@ -65,5 +65,10 @@ echo "== npm pack (contents)"
 npm pack --dry-run > /dev/null
 
 echo
+# 覆盖率：从**原始语料**反推「还有哪些编号形态没被覆盖」
+# （原始语料不在仓里 ⇒ 只在本地设了 MONEYMAKER_RAW_CORPUS 时才跑）
+if [ -n "${MONEYMAKER_RAW_CORPUS:-}" ]; then
+  python3 tools/coverage_check.py "$MONEYMAKER_RAW_CORPUS"
+fi
 python3 scripts/check_published_sha.py
 echo "all checks passed"
