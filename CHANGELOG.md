@@ -618,3 +618,14 @@ Multi-agent support, modelled on the per-harness manifest pattern used by
   applies no block cap (dsh discussion #1521).
 - Tests: 16 dsh contract + detector-CLI tests.
 
+<!-- BEGIN GENERATED: metrics -->
+**⇒ 当前口径（脱敏 + 剔行后，语料 1341 条，sha256[:16] = `3c1d78a78d692631`）**：
+
+| | before | after |
+|---|---|---|
+| released early by `boundary` | **404 (30.1%)** | **0** |
+| actually nudged | 30 | **39** (+9 recovered) |
+
+**真正的误放行 = 9 条（0.7%）**，不是 404 条 ——
+其余 395 条两版都放行（本来就没有触发信号，**不算误判**）。
+<!-- END GENERATED: metrics -->

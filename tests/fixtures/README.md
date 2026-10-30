@@ -210,3 +210,35 @@ python3 scripts/verify_claims.py
   `n1`/`n2`/`v0`/`48h`/`h24` 这些正常词 ⇒ 可读性会崩
 - `coverage_check.py` 现在的角色是**可读性守护**：报告「白名单是不是漏了哪些技术词」，
   不再承担安全性（安全性由兜底层保证）
+
+## 语料里出现的全部占位符
+
+<!-- BEGIN GENERATED: placeholders -->
+| 占位符 | 次数 |
+|---|---:|
+| `<CODE>` | 2300 |
+| `<TASK_CODE>` | 1944 |
+| `<TIME>` | 1001 |
+| `<REF>` | 413 |
+| `<DATE>` | 400 |
+| `<PLATFORM>` | 190 |
+| `<FAN_COUNT>` | 87 |
+| `<PATH>` | 86 |
+| `<PRIVATE_TOOL>` | 71 |
+| `<PRIVATE_PATH>` | 57 |
+| `<PRIVATE_REPO>` | 31 |
+| `<CRON_ID>` | 25 |
+| `<MEDIA_ID>` | 20 |
+| `<THIRD_PARTY>` | 7 |
+| `<AUTHOR>` | 6 |
+| `<EMAIL_REDACTED>` | 5 |
+| `<TIMESTAMP>` | 5 |
+| `<IP>` | 3 |
+| `<READ_COUNT>` | 2 |
+| `<AMOUNT>` | 1 |
+| `<NUM>` | 1 |
+| `<CLAIM>` | 1 |
+| `<PUBLIC_ACCOUNT>` | 1 |
+
+合计 **6657** 处，23 种。
+<!-- END GENERATED: placeholders -->

@@ -1,0 +1,17 @@
+{
+  "generator_sha16": "9d65e8c0b9922bc9",
+  "raw_corpus_sha16": "7afce96ff92304eb",
+  "fixture_sha16": "3c1d78a78d692631",
+  "fixture_lines": 1341,
+  "metrics": {
+    "nudge_old": 30,
+    "early_old": 404,
+    "truly": 9,
+    "nudge_new": 39,
+    "early_new": 0,
+    "total": 1341,
+    "early_pct": 30.12677106636838,
+    "truly_pct": 0.6711409395973155,
+    "both_pass": 395
+  }
+}
