@@ -193,6 +193,15 @@ jobs:
     #   ⇒ 语料被误改 / 脱敏规则被改坏 / 三个脚本开始互相矛盾 ⇒ CI 必须红。
     steps:
       - uses: actions/checkout@v4
+        with:
+          # ⭐⭐ **必须有完整历史 + tag**：`verify_claims.py` / `replay_real.py` /
+          #   `replay_regression.py` 都要从 git 历史取 **v1.4.1** 的 detector
+          #   （旧版 vs 新版同语料对比）。
+          #   `actions/checkout` 默认是 shallow clone（fetch-depth: 1）
+          #   ⇒ **tag 数 0 ⇒ 取不到 v1.4.1 ⇒ 这道门直接 exit 2**（CI 必红）。
+          #   实测（本地 shallow clone 复现）：`git tag` = 0，
+          #   `python3 scripts/verify_claims.py` → 「取不到 v1.4.1」exit 2。
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
