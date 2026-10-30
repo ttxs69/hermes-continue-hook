@@ -108,6 +108,10 @@ SUB_RULES: list[tuple[str, str]] = [
     (r"(?<!\d)\d{16,19}(?!\d)", "<LONGBIG>"),
     (r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "<IP>"),
     (r"(?:sk-|ghp_|gho_|github_pat_|AKIA|AIza)[A-Za-z0-9_\-]{8,}", "<SECRET_REDACTED>"),
+    # ⚠⚠ **邮箱规则原来只在扫描侧有、替换侧没有**（R311 第二轮红队之后自查发现）：
+    #   ⇒ 扫描器查邮箱、替换器不脱敏 ⇒「27 类全 0」是**结构性绿灯**。
+    #   ⇒ 这就是「扫描侧与替换侧必须双向对账」的现实理由。
+    (r"[\w.+-]+@[\w-]+\.[\w.-]{2,}", "<EMAIL_REDACTED>"),
     # 本机路径（**必须跨行** —— 实测被换行截断过）
     # ⚠ 家目录路径（`~/.xxx/.env`）也要脱敏 —— 第一版只覆盖绝对路径，漏了它
     (r"/(?:home|Users|var|opt|etc|root|mnt|usr|proc|sys)(?:[ \t]*[/\\][ \t]*\w+)*", "<PATH>"),
@@ -232,9 +236,86 @@ def tail_only(text: str) -> str:
     return "\n\n".join(tail)[:MAX_CHARS]
 
 
+# ── URL 保护：URL 内的内容**不参与替换** ──
+# ⚠⚠ 为什么（红队第二轮实测）：规则的「宽网」会改写 URL 里的公开 ID。
+#   实测 `cron任务ID` 规则（12-40 位 hex）改写了 **31 处**，其中 4 处是
+#   公开新闻/政府网站的文章 ID（21jingji.com / m.tech.china.com /
+#   shanghai.gov.cn）⇒ **破坏引用可溯源性** ——
+#   而「URL 里的东西不脱敏」正是我声明过的取舍（公开资料，删了反而坏）。
+#
+# ⇒ **结构性修法**（而不是逐条加豁免）：替换前把 URL **整段摘出来**，
+#   替换完再放回去 ⇒ 任何规则都碰不到 URL 内的内容。
+#   ⚠ 代价：URL **里面**的敏感串也不会被脱敏。
+#   ⇒ 实测 113 个 URL 全是公开站点（唯一含敏感词的是
+#     `github.com/settings/tokens` = **设置页**，不是 token 本身）⇒ 可接受，
+#     且已在 tests/fixtures/README.md 的「已知边界」里写明。
+# ⚠⚠ URL 边界必须**排除中文标点**：原来的 `https?://\S+` 太贪婪，
+#   会把 URL 后面**紧跟的无空格中文**一起吞进 URL
+#   （实测：`...docs/45）；对352粉小号：...` 整段被当成 URL
+#   ⇒ 里面的 `352粉`/`100粉`（自家账号规模）逃过脱敏）。
+URL_RE = re.compile(r"https?://[^\s，。；、：！？）】》」』〉%,]+")
+# ⚠⚠ 负向后视 `(?<![@\w.-])`：**裸域名规则不能吞掉邮箱**
+#   （实测 `creators@n8n.io` 的 `n8n.io` 被当成裸域名 stash ⇒
+#   邮箱规则看不到完整串 ⇒ 第三方真实邮箱原样留在公开语料里）。
+BARE_DOMAIN_RE = re.compile(
+    r"(?<![@\w.-])[\w-]+(?:\.[\w-]+)*(?:\.com|\.cn|\.net|\.org|\.io|\.ai|\.co|\.dev|\.me|\.xyz)"
+    r"(?:/[^\s，。；、：！？）】》」』〉%,]*)?"
+)
+_URL_SLOT = "\x00u{}\x00"
+
+# ⚠⚠ **只有「公开 ID 类」在 URL 内豁免** —— 不是整段 URL。
+#   实测：URL 里混着**必须脱敏**的东西：
+#     · 第三方真实邮箱（`creators@n8n.io` / `xycoder@163.com`）⇒ 第三方隐私
+#     · 私有仓名（`github.com/ttxs69/daily-ledger`）⇒ 内部信息
+#     · 私有工具名（`.../ttxs69/mpdt.git`）⇒ 内部信息
+#   ⇒ 豁免集只含「删了会破坏引用可溯源性」的形态：
+#     日期 / 时刻 / 12+ 位 hex（文章 ID）/ 16-19 位长数字（公开文章 ID）
+URL_EXEMPT_RULE_MARKERS = (
+    # 日期（5 种写法）
+    r"\d{4}-\d{2}-\d{2}",
+    r"\d{4}年\d{1,2}月",
+    r"\d{4}/\d{1,2}/\d{1,2}",
+    r"20\d{6}",
+    r"20\d{2}[-年]\d{1,2}",
+    # 时刻
+    r"\d{1,2}:\d{2}",
+    # 12+ 位 hex（公开文章 ID）—— ⚠ 必须是**实际 pat 字符串**，
+    #   写成正则源码（`\[0-9a-f\]\{12,40\}`）会匹配不上 ⇒ 豁免失效
+    "[0-9a-f]{12,40}",
+    # 16-19 位长数字（公开文章 ID）
+    r"\d{16,19}",
+)
+
+
+def _is_url_exempt(pat: str) -> bool:
+    return any(m in pat for m in URL_EXEMPT_RULE_MARKERS)
+
+
 def sanitize(text: str) -> str:
+    """跑一遍替换规则。
+
+    ⚠ **URL 内的内容只跑「非豁免」规则**（见 URL_EXEMPT_RULE_MARKERS）：
+      公开 ID 类的形态在 URL 内保留（删了破坏引用），
+      但**敏感实体照脱敏**（第三方邮箱 / 私有仓名 / 私有工具名）。
+    """
+    stashed: list[str] = []
+
+    def _stash(m: re.Match[str]) -> str:
+        stashed.append(m.group(0))
+        return _URL_SLOT.format(len(stashed) - 1)
+
+    text = URL_RE.sub(_stash, text)
+    text = BARE_DOMAIN_RE.sub(_stash, text)
     for pat, rep in SUB_RULES:
         text = re.sub(pat, rep, text)
+    for i, u in enumerate(stashed):
+        # URL 内：只跑非豁免规则
+        u2 = u
+        for pat, rep in SUB_RULES:
+            if _is_url_exempt(pat):
+                continue
+            u2 = re.sub(pat, rep, u2)
+        text = text.replace(_URL_SLOT.format(i), u2)
     return text
 
 
@@ -249,18 +330,45 @@ def residual_scan(text: str) -> dict[str, int]:
          ⇒ 结构性修法：**扫描时对每行跑一次 drop_rows()**，
            任何「会被 pipeline 剔除的行」都算残留 ⇒ 两套判据永远一致。
     """
-    counts = {name: len(re.findall(pat, text)) for name, pat in RESIDUAL_PATTERNS.items()}
-    # ⚠ 豁免：**URL 里的日期**（`newsDetail_forward_19197868` / `20260314A03O2P00`）
-    #   是公开新闻链接的一部分，删了会破坏引用 ⇒ 不算残留。
-    #   ⇒ 判定时先剥掉所有 URL 再扫。
-    #   ⚠ 剥两种形态：`https://...` **和裸域名**（`chinanews.com.cn/sh/2026/03-15/...`）
-    stripped = re.sub(r"https?://\S+", "", text)
-    stripped = re.sub(r"\b[\w.-]+\.(?:com|cn|net|org|io|ai|co|dev|me|xyz)(?:/\S*)?", "", stripped)
-    counts["日期"] = len(re.findall(RESIDUAL_PATTERNS["日期"], stripped))
-    counts["时间戳"] = len(re.findall(RESIDUAL_PATTERNS["时间戳"], stripped))
-    counts["时刻"] = len(re.findall(RESIDUAL_PATTERNS["时刻"], stripped))
-    counts["cron任务ID"] = len(re.findall(RESIDUAL_PATTERNS["cron任务ID"], stripped))
+    # ⭐⭐ **扫描侧必须与替换侧完全同构**（R311 第三轮自查的关键修复）：
+    #   替换侧的语义是「URL 内只跑非豁免规则」⇒ 扫描侧必须**按段**算：
+    #     · URL 外的段 → 跑全部规则
+    #     · URL 内的段 → 只跑**非豁免**规则（公开 ID 类的形态保留）
+    #   ⇒ 否则会出现两类不一致：
+    #     ① 扫描报 0、替换没做 ⇒ **结构性绿灯**（邮箱那一类就是这样被抓到的）
+    #     ② 扫描报错、替换也不做 ⇒ 「门红但改不掉」（长数字那一类）
+    #   ⇒ 段化计算让两类不一致**在结构上不可能**。
+    segments = _split_by_url(text)
+    counts: dict[str, int] = {}
+    for name, pat in RESIDUAL_PATTERNS.items():
+        exempt = _is_url_exempt(pat)
+        n = 0
+        for is_url, chunk in segments:
+            if is_url and exempt:
+                continue
+            n += len(re.findall(pat, chunk))
+        counts[name] = n
     return counts
+
+
+def _split_by_url(text: str) -> list[tuple[bool, str]]:
+    """把文本切成「URL 段」与「非 URL 段」。"""
+    out: list[tuple[bool, str]] = []
+    pos = 0
+    matches = sorted(
+        list(URL_RE.finditer(text)) + list(BARE_DOMAIN_RE.finditer(text)),
+        key=lambda mm: mm.start(),
+    )
+    for m in matches:
+        if m.start() < pos:
+            continue
+        if m.start() > pos:
+            out.append((False, text[pos : m.start()]))
+        out.append((True, m.group(0)))
+        pos = m.end()
+    if pos < len(text):
+        out.append((False, text[pos:]))
+    return out
 
 
 def do_check(path: Path) -> int:
@@ -425,12 +533,72 @@ def _check_case(raw: str, label: str, must_not: str) -> list[str]:
         return [] if not kept else [f"未剔除 [{label}]: {raw!r}"]
     out = sanitize(raw)
     fails = []
+    if "豁免" in label:
+        # 豁免类：**必须原样保留**
+        if must_not not in out:
+            fails.append(f"URL 豁免失效 [{label}]: {raw!r} → {out!r}")
+        return fails
     if must_not in out:
         fails.append(f"替换未生效 [{label}]: {raw!r} → {out!r}")
     kept, _dropped = drop_rows([{"text": raw}])
     if not kept:
         fails.append(f"行级剔除误伤 [{label}]: {raw!r}")
     return fails
+
+
+# ── 双向对账表（R311 第三轮自查的产物）──
+# ⚠⚠ **每一类残留，要么有替换规则，要么有剔除规则** ——
+#   两边都没有 ⇒ 扫描器报 0、产物里原样残留 ⇒ **结构性绿灯**。
+#   实测：邮箱这一类**只在扫描侧有、替换侧没有** ⇒ 第三方真实邮箱
+#   （`creators@n8n.io` / `xycoder@163.com`）会原样留在公开语料里，
+#   而扫描器报「邮箱: 0」。两轮红队都没抓到 ⇒ **模式串比对抓不到它**，
+#   只能**拿真实样本跑一遍**。
+# ⇒ 这里给每一类配一个真实样本，逐条跑 sanitize / drop_rows，
+#    缺哪边就红 ⇒ 新增扫描类别时忘了加替换规则，self-test 立刻报。
+RESIDUAL_SAMPLES: dict[str, tuple[str, str]] = {
+    "手机号": ("打给我 13812345678", "13812345678"),
+    "邮箱": ("联系 creators@n8n.io", "creators@n8n.io"),
+    "身份证": ("身份证 11010119900307561X", "11010119900307561X"),
+    # ⚠ 路径样本用拼接（文件里不能出现本机绝对路径的字面量 —— 仓库有 hygiene 测试会扫）
+    "绝对路径": ("文件在 " + _HOME + "/x.md", _HOME),
+    "家目录路径": ("配置在 ~/.baoyu-skills/.env", "~/.baoyu"),
+    "IP": ("服务器 192.168.1.100", "192.168.1.100"),
+    "长数字": ("单号 2065523833575039002", "2065523833575039002"),
+    # ⚠ 密钥样本用**拼接**构造 —— 本文件里不能出现 credential 形状的字面量
+    #   （仓库有 hygiene 测试会扫，实测抓到过我一次）。
+    "密钥": ("token " + "sk-" + "abcdefgh12345678", "sk-" + "abcdefgh12345678"),
+    "私有仓": ("仓库 daily-ledger", "daily-ledger"),
+    "私有工具": ("工具 mpdt-public", "mpdt"),
+    "商业平台": ("上架到 Gumroad", "Gumroad"),
+    "内部代号": ("见 R311 第 3 条", "R311"),
+    "日期": ("提交 2026-10-15 完成", "2026-10-15"),
+    "时间戳": ("跑于 2026-10-20T07:25:14", "07:25:14"),
+    "时刻": ("于 19:49:44 结束", "19:49:44"),
+    "作者笔名": ("作者「林克」生成", "林克"),
+    "cron任务ID": ("任务 24a9bd59ddf0 已排", "24a9bd59ddf0"),
+    "第三方账号": ("见 @gefei55 的 MRR", "gefei55"),
+    "会话ID": ("会话 20260918_090905_ae4f7e66", "20260918_090905_ae4f7e66"),
+    "media_id": ("素材 Kqz5" + "A" * 45, "Kqz5"),
+    "公众号名": ("公众号 地球online实况", "地球online实况"),
+    "粉丝数": ("有 352 粉", "352"),
+    "第三方网名": ("②timqian 的 V2EX", "timqian"),
+    "自曝经营": ("客户关系数 = 0", "= 0"),
+    "冷发信SOP": ("名单分成两批，一批发给有预算的公众号运营者", "分成两批"),
+    "cron调度": ("每天 08:23 自动运行", "08:23"),
+    "账号规模": ("日阅读 100", "100"),
+    "内部项目名": ("站 ai-trends 上线", "ai-trends"),
+}
+
+
+def reconcile() -> list[str]:
+    """扫描侧 ↔ 替换侧/剔除侧的双向对账。返回问题列表（空 = 一致）。"""
+    problems = []
+    for name, (raw, must) in RESIDUAL_SAMPLES.items():
+        replaced = must not in sanitize(raw)
+        dropped = not drop_rows([{"text": raw}])[0]
+        if not (replaced or dropped):
+            problems.append(f"「{name}」既没有替换规则也没有剔除规则 ⇒ 扫描器报 0、产物里原样残留")
+    return problems
 
 
 def self_test() -> int:
@@ -465,6 +633,39 @@ def self_test() -> int:
         ("在 19:49:44 跑完了", "秒级时间戳", "19:49:44"),
         ("每天 08:23 自动运行", "时刻表（整行剔除）", "08:23"),
         ("任务 24a9bd59ddf0 已排", "cron 任务 ID", "24a9bd59ddf0"),
+        # ⚠ URL 内的**公开 ID**不该被改写（红队第二轮实测：cron 任务 ID 的
+        #   宽网改写了 31 处，其中 4 处是公开新闻/政府网站的文章 ID
+        #   ⇒ 破坏引用可溯源性）。⇒ 只豁免「公开 ID 类」。
+        (
+            "见 https://21jingji.com/article/a1b2c3d4e5f6/abcdef1234567890.html",
+            "URL 内的公开 ID（豁免）",
+            "abcdef1234567890",
+        ),
+        (
+            "裸域名也豁免 chinanews.com.cn/sh/2026/03-15/10587063.shtml",
+            "裸域名内的日期（豁免）",
+            "2026/03-15",
+        ),
+        # ⚠ 但 URL 里的**敏感实体必须照脱敏**（实测 URL 里混着第三方真实邮箱
+        #   与私有仓名 ⇒ 整段豁免会把它们一起放过）
+        ("联系 creators@n8n.io 即可", "URL 外的第三方邮箱", "creators@n8n.io"),
+        (
+            "见 https://example.com/x/creators@n8n.io/y",
+            "URL 内的第三方邮箱（仍须脱敏）",
+            "creators@n8n.io",
+        ),
+        (
+            "仓库 https://github.com/ttxs69/daily-ledger",
+            "URL 内的私有仓名（仍须脱敏）",
+            "daily-ledger",
+        ),
+        # ⚠ URL 边界不能吞掉后面紧跟的**无空格中文**（实测 `...docs/45）；对352粉小号`
+        #   整段被当成 URL ⇒ 账号规模逃过脱敏）
+        (
+            "见 https://ad.weixin.qq.com/docs/45）；对352粉小号",
+            "URL 边界不吃中文（账号规模仍须脱敏）",
+            "352粉",
+        ),
         ("素材 id Kqz5" + "A" * 45, "media_id", "Kqz5"),
         ("公众号 地球online实况 有 352 粉", "公众号名/粉丝数", "地球online实况"),
         ("他叫 timqian 赚了 400 美元", "第三方网名", "timqian"),
@@ -479,6 +680,8 @@ def self_test() -> int:
     fails: list[str] = []
     for raw, label, must_not in cases:
         fails.extend(_check_case(raw, label, must_not))
+    # ⭐ 双向对账：每一类残留都必须有替换规则或剔除规则
+    fails.extend(reconcile())
     # ③ 年份区间不该被误伤（红队实测过：2018-2019 是市场数据，不是日期）
     for safe in ["补贴期是 2018-2019 年", "价格区间 2000-3000 元", "覆盖 2024-2026"]:
         if sanitize(safe) != safe:
