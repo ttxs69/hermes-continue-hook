@@ -639,8 +639,10 @@ def _is_allowed_token(tok: str) -> bool:
 #   ⇒ 现在**必须以下述「字母」开头**（希腊 / 全角拉丁 / 日文假名），
 #     不含汉字（汉字+数字是正常中文）、不含标点、不含货币符号。
 NON_ASCII_CODE_RE = re.compile(
-    r"(?:[\u0370-\u03ff\uff21-\uff3a\uff41-\uff5a\u3041-\u30ff]"
-    r"[\w\u0370-\u03ff\uff21-\uff3a\uff41-\uff5a\u3041-\u30ff\u2080-\u209c]{1,31})"
+    r"(?:[\u0370-\u03ff\u0400-\u04ff\u2200-\u22ff\uff21-\uff3a\uff41-\uff5a"
+    r"\u3041-\u30ff\uff66-\uff9d]"
+    r"[\u0370-\u03ff\u0400-\u04ff\u2200-\u22ff\uff21-\uff3a\uff41-\uff5a"
+    r"\u3041-\u30ff\uff66-\uff9d\u2080-\u209c\u00b2\u00b3\u00b9\d_-]{1,31})"
 )
 
 TOKEN_RE = re.compile(

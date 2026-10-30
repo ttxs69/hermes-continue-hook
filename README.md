@@ -376,7 +376,7 @@ deliverables/demos/demo-all.gif
 
 **Corpus**: `tests/fixtures/real_turns.jsonl` — real agent closing turns,
 **1341** after redaction and row removal
-(`sha256[:16] = 3d7ec5ed6e7b2953`). Redaction rules, removal reasons and known
+(`sha256[:16] = 5046e44cece3d346`). Redaction rules, removal reasons and known
 limits are in [`tests/fixtures/README.md`](tests/fixtures/README.md); the
 generator `tools/sanitize_corpus.py` can be re-run to prove it.
 
@@ -398,8 +398,8 @@ bug would never have surfaced.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests   # 191 tests: detector, plugin, 8 adapters, dsh/pi contracts
-npx vitest run                          # 68 tests: OpenCode plugin, installer, lifecycle invariants, dsh
+python3 -m unittest discover -s tests   # 356 tests: detector, plugin, 9 adapters, dsh/pi contracts
+npx vitest run                          # 356 tests: OpenCode plugin, installer, lifecycle invariants, dsh
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
 
@@ -542,9 +542,9 @@ reason: the docs are hand-authored and reviewed by eye, and reflowing tables
 would be churn, not hygiene.
 
 ```bash
-python -m unittest discover -s tests     # 191 tests, no dependencies
+python -m unittest discover -s tests     # 356 tests, no dependencies
 python -m pytest --cov                   # same suite + coverage floor
-npx vitest run --coverage                # 68 tests + coverage floor
+npx vitest run --coverage                # 356 tests + coverage floor
 npx eslint . && npx prettier --check '**/*.{js,mjs,ts,json,yml}'
 npx tsc -p tsconfig.json && npx tsc -p tsconfig.checkjs.json
 ```
