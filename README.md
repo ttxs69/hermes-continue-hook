@@ -376,7 +376,7 @@ deliverables/demos/demo-all.gif
 
 **Corpus**: `tests/fixtures/real_turns.jsonl` — real agent closing turns,
 **1341** after redaction and row removal
-(`sha256[:16] = dbf45fa28b5ad87a`). Redaction rules, removal reasons and known
+(`sha256[:16] = a385e3436a075430`). Redaction rules, removal reasons and known
 limits are in [`tests/fixtures/README.md`](tests/fixtures/README.md); the
 generator `tools/sanitize_corpus.py` can be re-run to prove it.
 

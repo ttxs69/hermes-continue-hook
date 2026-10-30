@@ -207,10 +207,12 @@ jobs:
           python-version: "3.12"
       - name: Redaction rules still hold (self-test)
         run: python3 tools/sanitize_corpus.py --self-test
-      - name: The published corpus has no residue (22+ classes)
+      - name: The published corpus has no residue (29 classes + dropped-rows = 30)
         run: python3 tools/sanitize_corpus.py --check tests/fixtures/real_turns.jsonl
       - name: Three scripts agree (cross-check + hard red line)
         run: python3 scripts/verify_claims.py
+      - name: Published artifacts carry the current corpus sha
+        run: python3 scripts/check_published_sha.py
       - name: The published corpus is a fixed point of the generator
         run: |
           set -euo pipefail

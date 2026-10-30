@@ -343,7 +343,7 @@ deliverables/demos/demo-all.gif
 | 3 | 「10 个宿主怎么保证规则一致」 | `scripts/check_hosts.py` | 9 个 adapter 结构化路由 + 84 项契约测试 |
 
 **语料**：`tests/fixtures/real_turns.jsonl` —— 真实 agent 收尾，脱敏与剔行后
-**1341** 条（`sha256[:16] = dbf45fa28b5ad87a`）。脱敏规则、剔除原因、已知边界见
+**1341** 条（`sha256[:16] = a385e3436a075430`）。脱敏规则、剔除原因、已知边界见
 [`tests/fixtures/README.md`](tests/fixtures/README.md)，生成器 `tools/sanitize_corpus.py`
 可以重跑验证。
 
