@@ -47,7 +47,10 @@ class TestEmbed(unittest.TestCase):
         r = self._run()
         self.assertEqual(r.returncode, 0, r.stderr)
         with Image.open(self.gif) as im:
-            self.assertEqual(im.info.get("comment").decode(), cur_sha())
+            got = im.info.get("comment").decode()
+            frames = getattr(im, "n_frames", 1)
+            # comment 格式是 `sha:frames`（帧数一起记，防「切到前 N 帧」）
+            self.assertEqual(got, f"{cur_sha()}:{frames}")
 
     def test_pixels_unchanged(self) -> None:
         """只插块，不碰像素 —— 逐帧比对必须全同。"""
@@ -129,6 +132,25 @@ class TestGate(unittest.TestCase):
         import embed_gif_sha as eg
 
         gif.write_bytes(eg.strip_comments(gif.read_bytes()))
+        self.assertEqual(self._gate().returncode, 78)
+
+    def test_red_when_truncated_to_two_frames(self) -> None:
+        """红队第八轮：按块结构切到「刚好前 2 帧 + 0x3B」的文件曾能过门（2 帧）。
+
+        ⇒ comment 里记了录制时的帧数（`sha:frames`），帧数不符 ⇒ 红。
+        """
+        gif = self.repo / "deliverables" / "demos" / "demo-all.gif"
+        data = gif.read_bytes()
+        # 找到第三个图像描述符（0x2C）的位置，切掉它及之后，换成 trailer
+        pos = 13 + (3 * (2 ** ((data[10] & 0x07) + 1)) if data[10] & 0x80 else 0)
+        seen = 0
+        while pos < len(data):
+            if data[pos] == 0x2C:
+                seen += 1
+                if seen == 3:  # 第 3 帧开始 ⇒ 切到这里
+                    break
+            pos += 1
+        gif.write_bytes(data[:pos] + b"\x3b")
         self.assertEqual(self._gate().returncode, 78)
 
     def test_red_when_corpus_changes(self) -> None:

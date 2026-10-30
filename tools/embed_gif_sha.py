@@ -163,7 +163,11 @@ def main() -> int:
         return 78
     before = args.gif.stat().st_size
     before_bytes = args.gif.read_bytes()
-    embed(args.gif, sha)
+    # ⚠ comment 里**同时写帧数**（`sha:frames`）：红队第八轮证明「切到刚好 2 帧 + 0x3B」
+    #   的文件能通过只查 sha 的门。帧数由这次录制决定 ⇒ 截断就会被发现。
+    with Image.open(args.gif) as _im:
+        _frames = getattr(_im, "n_frames", 1)
+    embed(args.gif, f"{sha}:{_frames}")
     after = args.gif.stat().st_size
 
     # 立刻读回来验证（不信任自己写的）
@@ -182,10 +186,11 @@ def main() -> int:
 
     got = (Image.open(args.gif).info or {}).get("comment")
     got = got.decode("ascii", "replace") if isinstance(got, bytes) else got
-    if got != sha:
-        print(f"❌ 嵌入后读回是 {got!r}，期望 {sha!r}", file=sys.stderr)
+    expected = f"{sha}:{_frames}"
+    if got != expected:
+        print(f"❌ 嵌入后读回是 {got!r}，期望 {expected!r}", file=sys.stderr)
         return 78
-    print(f"✅ 已把 {sha} 写进 GIF comment（{before} → {after} B，差 {after - before} B）")
+    print(f"✅ 已把 {expected} 写进 GIF comment（{before} → {after} B，差 {after - before} B）")
     return 0
 
 

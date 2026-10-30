@@ -89,7 +89,16 @@ def gif_sha() -> tuple[str | None, str]:
             "GIF 里没有 sha comment ⇒ 无法证明它是用当前语料录的（跑 tools/embed_gif_sha.py）",
         )
     sha = raw.decode("ascii", "replace") if isinstance(raw, bytes) else str(raw)
-    return sha.strip(), ""
+    sha = sha.strip()
+    # ⚠ 红队第八轮：按块结构切到「刚好前 2 帧 + 0x3B」（88293 B / 2 帧）**门仍为 0**。
+    #   ⇒ comment 里同时存**录制时的帧数**（`sha:frames`），门要求两者都匹配。
+    #   伪造它就得同时改 sha 和帧数 —— 那是主动伪造，超出这道门的职责（见 docstring）。
+    if ":" in sha:
+        sha_part, frames_part = sha.rsplit(":", 1)
+        if frames_part.isdigit() and int(frames_part) != n:
+            return None, f"GIF 帧数 {n} ≠ 录制时记录的 {frames_part} ⇒ 文件被截断/替换过"
+        sha = sha_part
+    return sha, ""
 
 
 def check_docs(sha: str) -> list[str]:
