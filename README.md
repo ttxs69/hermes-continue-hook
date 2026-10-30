@@ -375,8 +375,8 @@ deliverables/demos/demo-all.gif
 | 3 | "Ten hosts — how do you keep the rule identical?" | `scripts/check_hosts.py` | 9 adapters route structurally + 84 contract tests |
 
 **Corpus**: `tests/fixtures/real_turns.jsonl` — real agent closing turns,
-**1348** after redaction and row removal
-(`sha256[:16] = b8068ccb0cef0cf2`). Redaction rules, removal reasons and known
+**1341** after redaction and row removal
+(`sha256[:16] = b87d47e0432a7587`). Redaction rules, removal reasons and known
 limits are in [`tests/fixtures/README.md`](tests/fixtures/README.md); the
 generator `tools/sanitize_corpus.py` can be re-run to prove it.
 

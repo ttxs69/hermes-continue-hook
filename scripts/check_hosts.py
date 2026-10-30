@@ -112,6 +112,58 @@ ROUTE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 
 def strip_comments(text: str) -> str:
+    """去掉注释与**字符串字面量** —— 里面提到入口**不算路由**。
+
+    ⚠ 红队第二轮 D3/D4 实测的绕过面：
+      ① docstring 里的 import 示例：``\"\"\"from detector import build_nudge\"\"\"``
+      ② JSON 里的字符串值：``{"__comment__": "from detector import build_nudge"}``
+      ⇒ 原实现只去 `#` / `//` 行 ⇒ 两种都算「已路由」。
+    ⇒ 现在：**Python 文件用 ast 精确剥掉所有 docstring**；
+      **JSON 文件只保留 key**（值是数据，不是代码）。
+    """
+    import json as _json
+
+    stripped = _strip_line_comments(text)
+
+    # ① Python：用 ast 剥掉所有 docstring（模块/类/函数的）
+    if ("<" not in text[:200] and "def " in text) or "import " in text:
+        try:
+            import ast as _ast
+
+            tree = _ast.parse(text)
+            spans = [
+                (node.body[0].lineno - 1, node.body[0].end_lineno)
+                for node in _ast.walk(tree)
+                if isinstance(
+                    node, (_ast.Module, _ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)
+                )
+                and node.body
+                and isinstance(node.body[0], _ast.Expr)
+                and isinstance(getattr(node.body[0], "value", None), _ast.Constant)
+                and isinstance(node.body[0].value.value, str)
+            ]
+            if spans:
+                lines = stripped.splitlines()
+                for start, end in spans:
+                    for i in range(start, min(end, len(lines))):
+                        lines[i] = ""
+                stripped = "\n".join(lines)
+        except Exception:
+            pass  # 语法不完整 ⇒ 保留原样（下面的行注释剥离已生效）
+
+    # ② JSON：只保留 key（值是数据，不是路由证据）
+    if stripped.lstrip().startswith("{"):
+        try:
+            obj = _json.loads(stripped)
+            if isinstance(obj, dict):
+                stripped = "\n".join(f'"{k}"' for k in obj)
+        except Exception:
+            pass
+
+    return stripped
+
+
+def _strip_line_comments(text: str) -> str:
     """去掉注释行 —— 注释里提到入口**不算路由**（红队实测的绕过手法）。"""
     out = []
     for line in text.splitlines():
@@ -322,6 +374,11 @@ def main() -> int:
     n = len(adapters)
     all_ok = all(v["ok"] for v in tests.values())
     routed = n - len(missing)
+    # ⚠⚠ patch-mode 不是生成物 ⇒ **必须失败**（红队第二轮 D6）：
+    #   原来它只被打印成「❌ 否」却仍然 exit 0 ⇒ 这道门是空的。
+    #   而且逻辑是**反的**：「❌ 否 ⇒ 不算第二份实现」——
+    #   它不是生成物，恰恰**就是**第二份实现。
+    patch_ok = bool(impl["patch_mode_is_generated"])
 
     # enforce 口径：README 解析出来的数（若能解析）否则退回 n+1
     enforce = readme.get("enforce") or (n + 1)
@@ -356,7 +413,7 @@ def main() -> int:
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if all_ok and not missing else 78
+        return 0 if all_ok and not missing and patch_ok else 78
 
     # ⭐ 口径：README「Supported agents」表里 **enforce 级 = 10 个宿主**；
     #   adapter 目录只有 9 个，因为 **Hermes Agent 本身是本仓的 origin**
@@ -400,16 +457,19 @@ def main() -> int:
         f" + 薄适配层，不是 {enforce} 份实现。"
     )
     print(f"     实测到定义 detect 的文件：{impl['independent_detector_files'] or '（无）'}")
-    print(
-        f"     patch-mode 是生成物：{'✅ 是（build-patch-mode.py --check 通过）' if impl['patch_mode_is_generated'] else '❌ 否'}"
-        f" ⇒ 不算第二份实现"
-    )
+    if impl["patch_mode_is_generated"]:
+        print("     patch-mode 是生成物：✅ 是（build-patch-mode.py --check 通过）⇒ 不算第二份实现")
+    else:
+        # ⚠ 逻辑别写反：它**不是**生成物 ⇒ 它**就是**第二份实现（手写的）。
+        print("     patch-mode 不是生成物：❌ 否 ⇒ **它就是第二份实现**（手写的，会漂移）")
+        print(f"       详情：{impl['patch_mode_check']}")
     print("     历史上 patch 模式曾手写第二份 ⇒ 与插件版漂移 ⇒ 已改为共享引擎生成。")
     print()
     print("=" * 70)
     print("  复算：python3 scripts/check_hosts.py")
     print("=" * 70)
-    return 0 if all_ok and not missing else 78
+    # ⚠ patch-mode 过期 ⇒ 失败（红队第二轮 D6）
+    return 0 if all_ok and not missing and patch_ok else 78
 
 
 if __name__ == "__main__":
