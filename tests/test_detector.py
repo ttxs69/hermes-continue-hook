@@ -738,6 +738,11 @@ class TestMoneyIsAlwaysABoundary(unittest.TestCase):
         self.assertIn("then stop", low)
         # 判据是「动作本身」，不是「谁持有凭据」
         self.assertIn("not about who owns the credential", low)
+        # gap #6（2026-11-02 用户指令）：问用户前先查自己的记录
+        self.assertIn("check your own records first", low)
+        # 2026-11-02 用户指令：默认继续，只有第1/2条允许停；「下一步」不算完成
+        self.assertIn("default is continue", low)
+        self.assertIn("a declared next step is not a completed step", low)
 
     def test_promise_nudge_text_carries_the_same_guard(self):
         """promise 版同样必须自带护栏（承诺要花钱时改成「问那一样东西」）。"""
