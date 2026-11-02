@@ -18,12 +18,14 @@ from typing import Any
 
 # ⚠ 这是**声明**，不是分发表 —— 真正的分发在：
 #   · `_first_trigger_hit()` 的元组（offer / hand_off / confirm_seek）
-#   · `detect()` 里 promise 与 question_mark 各自的独立分支
+#   · `detect()` 里 promise / question_mark / unverified_claim 各自的独立分支
 # 2026-10-29 红队实测：只把第 6 个键加进这里和配置，它**仍然静默走
 # no_trigger**，而原来的断言（两张手写表相等）会盖章说没问题 —— 测试剧场。
 # ⇒ 现在由 `TestTriggerDispatchIsReal.test_each_trigger_actually_fires` 逐键跑
 #   一个真实句子来证明它**真的能触发**，那才是能抓住漏登记的断言。
-DISPATCHED_TRIGGERS = frozenset({"promise", "offer", "hand_off", "confirm_seek", "question_mark"})
+DISPATCHED_TRIGGERS = frozenset(
+    {"promise", "offer", "hand_off", "confirm_seek", "question_mark", "unverified_claim"}
+)
 
 __all__ = ["DEFAULTS", "ConfigStore", "build_nudge", "default_config", "detect"]
 
@@ -45,6 +47,23 @@ _MARKDOWN_LINK_RE = re.compile(r"\]\([^)]*\)")
 # opening fence by hand) — everything after an opening fence is still code.
 _CODE_BLOCK_RE = re.compile(r"```.*?```|```[\s\S]*$", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]{1,120}`")
+
+# ── unverified_claim（2026-11-02 用户指令：一天 5 次「宣布完成未验证」）──
+# 收尾（tail_chars 窗口、剥引用后）同时满足：
+#   ① 含完成词（词表在 triggers.unverified_claim.completion_words，可改）
+#   ② 无任何验证凭据标记
+# ⇒ 触发 nudge。凭据形状：``` 代码围栏 / exit 码 / ≥7 位十六进制哈希 /
+# [未查证] 显式标签。事后扫描无效（伤害在宣布那一刻已发生），唯一的
+# 预送达干预点就是这个停止闸 —— 所以判据是「收尾段里**直接看得见**凭据」，
+# 同消息前文出现过不算（见 NUDGE_TEMPLATE 第 5 条）。
+_CREDENTIAL_RE = re.compile(
+    r"```"  # a fenced block — the command+output shape is itself evidence
+    r"|exit[\s_-]*(?:code[\s_=-]*)?\d+"  # exit 0 / exit_code=1 / exitcode 2
+    r"|退出码\s*\d+"  # the same, in Chinese
+    r"|\b[0-9a-f]{7,}\b"  # ≥7-hex hash (git short sha and longer)
+    r"|\[未查证\]",  # the explicit unverified label
+    re.IGNORECASE,
+)
 
 # 「说了下一步但没做」的专用文案。2026-10-29 实测：agent 用陈述式承诺
 # （「下一步我去查 X」）收尾时，原四类触发（offer/hand_off/confirm_seek/question_mark）
@@ -94,6 +113,13 @@ NUDGE_TEMPLATE = (
     "including steps you merely announced as 「下一步/next steps」 — must be "
     "executed in THIS turn. A declared next step is not a completed step; "
     "deferring executable work to a future turn is stopping without cause.\n"
+    "5. Every completion claim in your closing (「已生效/已完成/已修/已验证/"
+    "已通过/已落盘/已推/搞定」 or done/fixed/verified/passed) must carry its "
+    "verification evidence IN THE SAME closing section: the command plus its "
+    "actual output, an exit code, a hash, or a repro marker. Evidence that "
+    "appeared earlier in this same message does not count — it must be visible "
+    "in the closing itself. No evidence? Either run the verification now and "
+    "show it, or mark that claim [未查证].\n"
     "(auto nudge #{attempt}; do not mention this nudge in your final reply.)"
 )
 
@@ -196,6 +222,29 @@ DEFAULTS: dict = {
         # Any question mark in the closing tail. True/false is judged by the
         # agent inside the nudge, not here.
         "question_mark": True,
+        # Completion claims with no visible verification evidence. Shape rule,
+        # judged on the closing tail after quote stripping: ① a completion
+        # word from `completion_words` (user-editable) is present AND ② none
+        # of the credential markers (``` fence / exit code / ≥7-hex hash /
+        # [未查证] label) is visible in that same closing. Evidence earlier in
+        # the message does not count — see NUDGE_TEMPLATE item 5.
+        # Set the whole key to `false` to switch the trigger off.
+        "unverified_claim": {
+            "completion_words": [
+                "已生效",
+                "已完成",
+                "已修",
+                "已验证",
+                "已通过",
+                "已落盘",
+                "已推",
+                "搞定",
+                "done",
+                "fixed",
+                "verified",
+                "passed",
+            ],
+        },
     },
     # Exclusions: any hit short-circuits to skip — legitimate asks and real
     # blockers. Better to miss a nudge than to interrupt a real question.
@@ -349,6 +398,35 @@ def _first_trigger_hit(triggers: dict, tail: str) -> str | None:
     return None
 
 
+def _completion_words_re(value: Any) -> re.Pattern | None:
+    """The unverified_claim completion-word matcher, or None when disabled.
+
+    Accepts the default dict shape (``{"completion_words": […]}``), a plain
+    list of words, or ``false`` to switch the trigger off entirely — the
+    config file is user-editable, so a malformed value must degrade, not
+    raise (same discipline as ``_int``).
+    """
+    if value is False or value is None:
+        return None
+    if isinstance(value, dict):
+        if not value.get("enabled", True):
+            return None
+        words = value.get("completion_words")
+    else:
+        words = value
+    pats = []
+    for w in words or []:
+        w = str(w).strip()
+        if not w:
+            continue
+        # English words need boundaries ("done" must not match "download");
+        # Chinese words are substrings by nature ("已修" must match "已修复").
+        pats.append(rf"\b{re.escape(w)}\b" if w.isascii() and w.isalpha() else re.escape(w))
+    if not pats:
+        return None
+    return re.compile("|".join(f"(?:{p})" for p in pats), re.IGNORECASE)
+
+
 def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     """Return ``(should_nudge, reason_code)``. Pure transport layer.
 
@@ -413,6 +491,22 @@ def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
         return True, "trigger:promise"
     if _compile(ex.get("user_must")).search(tail):
         return False, "user_must"
+    # ------------------------------------------------------------------
+    # `unverified_claim`（2026-11-02）：收尾窗口里有完成词、却看不到任何
+    # 验证凭据。⚠ 用 raw tail（只剥引用，不剥代码块）：``` 围栏本身就是
+    # 凭据，先剥掉它会把「带命令输出的完成报告」误判成未验证。
+    # ⚠ 凭据必须在收尾段本身可见 —— 同消息前文出现过不算（判形状不判
+    # 意思：有围栏/exit 码/哈希/[未查证] 就是「看得见」，至于凭据是否
+    # 真的支撑那个断言，由被 nudge 的 agent 按 NUDGE_TEMPLATE 第 5 条自判）。
+    _uv_words = _completion_words_re(tr.get("unverified_claim"))
+    if (
+        _uv_words is not None
+        and _uv_words.search(trig_tail)
+        and not _CREDENTIAL_RE.search(trig_tail)
+    ):
+        if _int(attempt, 0) >= _int(cfg.get("max_nudges_per_turn", 2), 2):
+            return False, "max_nudges"
+        return True, "trigger:unverified_claim"
     # The closing window of the code-stripped text, so the "?" check only sees
     # punctuation that is actually prose.
     no_urls = _QUOTE_RE.sub("", stripped[-tail_chars:])

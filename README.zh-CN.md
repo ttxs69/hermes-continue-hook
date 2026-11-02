@@ -224,6 +224,7 @@ agent turn ends with "…Want me to continue?"
 | `triggers.hand_off` | — | 决策移交：`你定`, `听你的`, `your call` |
 | `triggers.confirm_seek` | — | 求确认：`这样可以吗`, `does this work` |
 | `triggers.question_mark` | `true` | 结尾部分出现任意 `？/?` |
+| `triggers.unverified_claim` | 见默认值 | 收尾段出现完成词（`已修`、`搞定`、`done`、`fixed` …）却看不到验证凭据（代码围栏 / exit 码 / ≥7 位十六进制哈希 / `[未查证]`） |
 | `exclusions.boundary` | — | 只有用户能拍板的边界：金钱、身份、凭据、发布、破坏性操作 |
 | `exclusions.user_must` | — | 第二人称请求：只有用户能提供或决定的事 |
 
@@ -363,7 +364,7 @@ python3 scripts/verify_claims.py     # 交叉核对三个脚本
 ## 测试
 
 ```bash
-python3 -m unittest discover -s tests   # 356 tests: detector, plugin, 9 adapters, dsh/pi contracts
+python3 -m unittest discover -s tests   # 363 tests: detector, plugin, 9 adapters, dsh/pi contracts
 npx vitest run                          # node 套件（条数以 npm test 输出为准）: OpenCode plugin, installer, lifecycle invariants, dsh
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
@@ -488,7 +489,7 @@ bug——一个并不存在的属性、一个被当 `Error` 读的 `unknown` 错
 制造无谓的改动，不是真正的整洁。
 
 ```bash
-python -m unittest discover -s tests     # 356 tests, no dependencies
+python -m unittest discover -s tests     # 363 tests, no dependencies
 python -m pytest --cov                   # same suite + coverage floor
 npx vitest run --coverage                # node 套件 + 覆盖率下限（条数以输出为准）
 npx eslint . && npx prettier --check '**/*.{js,mjs,ts,json,yml}'

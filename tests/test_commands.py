@@ -110,7 +110,7 @@ class TestTestCommand(_HomeCase):
         self.assertIn("trigger:", out)
 
     def test_a_clean_delivery_does_not(self) -> None:
-        out = PLUGIN._cmd_test("已完成 README 优化。验证：lint 通过。")
+        out = PLUGIN._cmd_test("已完成 README 优化。验证：lint 通过，`pnpm lint` exit 0。")
         self.assertIn("detect=False", out)
 
     def test_a_user_approval_request_is_excluded(self) -> None:

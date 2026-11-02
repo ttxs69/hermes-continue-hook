@@ -50,7 +50,8 @@ const { handleIdle, lastAssistantText, sessionIdOf, idleVerdict, ContinueHookPlu
   await import(path.join(REPO, "adapters", "opencode", "continue-hook.js"));
 
 const ASK = "要不要我顺便也把示例补上？";
-const PLAIN = "已完成，验证通过。";
+// 2026-11-02：完成断言必须同段带凭据（triggers.unverified_claim），干净收尾要带 exit 码。
+const PLAIN = "已完成，验证通过，`pytest -q` exit 0。";
 
 function mockClient(messages, { failPrompt = false } = {}) {
   const calls = { prompts: [] };
@@ -219,7 +220,8 @@ it("idleVerdict says no when the reply is not asking", () => {
     path.join(HOME, ".hermes", "continue_hook.json"),
     JSON.stringify({ cooldown_seconds: 0 }),
   );
-  const decision = idleVerdict("done. everything is fine.", "s-pure");
+  // 2026-11-02：裸 "done." 是无凭据完成断言（triggers.unverified_claim）。
+  const decision = idleVerdict("done. everything is fine, exit 0.", "s-pure");
   assert.strictEqual(decision.nudged, false);
   assert.ok(decision.reason.length > 0);
 });

@@ -243,6 +243,7 @@ decided by the agent, inside the nudge. Patterns are plain configurable regexes
 | `triggers.hand_off` | — | Decision hand-offs: `你定`, `听你的`, `your call` |
 | `triggers.confirm_seek` | — | Confirmation-seeking: `这样可以吗`, `does this work` |
 | `triggers.question_mark` | `true` | Any `？/?` in the closing tail |
+| `triggers.unverified_claim` | see defaults | Completion words (`已修`, `搞定`, `done`, `fixed`, …) in the closing with no visible evidence (code fence / exit code / ≥7-hex hash / `[未查证]`) |
 | `exclusions.boundary` | — | User-only boundaries: money, identity, credentials, publishing, destructive actions |
 | `exclusions.user_must` | — | Second-person requests: only the user can supply/decide this |
 
@@ -398,7 +399,7 @@ bug would never have surfaced.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests   # 356 tests: detector, plugin, 9 adapters, dsh/pi contracts
+python3 -m unittest discover -s tests   # 363 tests: detector, plugin, 9 adapters, dsh/pi contracts
 npx vitest run                          # node suite (count per npm test output): OpenCode plugin, installer, lifecycle invariants, dsh
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
@@ -542,7 +543,7 @@ reason: the docs are hand-authored and reviewed by eye, and reflowing tables
 would be churn, not hygiene.
 
 ```bash
-python -m unittest discover -s tests     # 356 tests, no dependencies
+python -m unittest discover -s tests     # 363 tests, no dependencies
 python -m pytest --cov                   # same suite + coverage floor
 npx vitest run --coverage                # node suite + coverage floor (count per output)
 npx eslint . && npx prettier --check '**/*.{js,mjs,ts,json,yml}'

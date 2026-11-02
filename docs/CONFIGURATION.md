@@ -19,7 +19,10 @@ One file, shared by every host:
     "offer": ["要不要我", "should i\b", "do you want me to\b", …],
     "hand_off": ["听你的", "交给…你定", "up to you", …],
     "confirm_seek": ["这样可以吗", "does this work", …],
-    "question_mark": true          // any ? or ？ in the tail
+    "question_mark": true,         // any ? or ？ in the tail
+    "unverified_claim": {          // completion claim with no visible evidence
+      "completion_words": ["已完成", "已修", "搞定", "done", "fixed", …]
+    }
   },
 
   "exclusions": {                  // any hit short-circuits to "no nudge"
