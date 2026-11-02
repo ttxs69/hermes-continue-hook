@@ -90,7 +90,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm
     steps:
+      # fetch-depth: 0 — the prepublish gate's verify_claims.py diffs the
+      # detector against the v1.4.1 tag (`git show v1.4.1:detector.py`). The
+      # default shallow checkout fetches only the triggering ref, so every
+      # other tag is absent and the gate dies with 取不到 v1.4.1 (v1.5.1
+      # publish attempt, run 41435622547). The repo is ~20MB; full history
+      # is cheaper than a gate that cannot run.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           # One source of truth: .nvmrc (node 24, which ships npm >= 11.5.1 —
