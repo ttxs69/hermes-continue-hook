@@ -4,6 +4,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Prefer this repo's own .venv when it exists, so a bare `bash scripts/check.sh`
+# works without the caller exporting PATH first (round-14 non-blocking
+# finding: bare python3 resolved to a python without pytest and the gate died
+# mid-run). If there is no .venv, behavior is unchanged — the caller's PATH
+# decides, exactly as before.
+if [ -x ".venv/bin/python3" ]; then
+  PATH="$PWD/.venv/bin:$PATH"
+  export PATH
+fi
+
 # The toolchain must be the one the workflows use. A gate that runs on a
 # different node/npm than CI is a gate that does not predict CI: the publish
 # job used to run a different npm than every other job, and the difference
