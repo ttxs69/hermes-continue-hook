@@ -64,7 +64,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: python -m pip install --upgrade pip pytest pytest-cov ruff
+        run: python -m pip install --upgrade pip pytest pytest-cov ruff pillow
       - name: pytest with the coverage floor
         run: pytest --cov --cov-report=term-missing
       # The release scripts are maintainer tools, not part of the published
@@ -138,8 +138,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       # ruff is needed by the complexity-gate test; without it that test
       # skips and the Python half of the gate is never checked here.
+      # pillow is needed by test_published_sha_gate (the GIF gate test) —
+      # the round-12 fix only installed it in corpus-gate, so every job that
+      # runs the full unittest suite died at import (PR #29, first CI run).
       - name: Install ruff
         run: pip install ruff
+      - name: Install test dependencies (pillow for the GIF gate test)
+        run: python -m pip install --disable-pip-version-check pillow
       - name: Run the test suite
         run: python -m unittest discover -s tests -v
 
