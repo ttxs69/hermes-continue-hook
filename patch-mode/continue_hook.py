@@ -90,9 +90,17 @@ NUDGE_TEMPLATE = (
     "   If yes → re-ask in ONE short line (that single decision only), then stop. "
     "This check is about the action itself, not about who owns the credential.\n"
     "2. Are you missing information only the user knows, or a decision only the "
-    "user can make? If yes → re-ask in ONE short line, then stop.\n"
+    "user can make? Before answering yes, CHECK YOUR OWN RECORDS FIRST "
+    "(search_files over state/ ledgers and notes, session_search over past "
+    "turns). Asking the user for information you already hold is a trust-killer. "
+    "Only if the search comes up empty → re-ask in ONE short line, then stop.\n"
     "3. Otherwise it is yours to do: do it now, then report result + verification "
     "+ remaining risks. Do not ask again.\n"
+    "4. Default is CONTINUE: the only permitted stops are items 1 (the fixed "
+    "unconditional list above) and 2 (user-only information). Everything else — "
+    "including steps you merely announced as 「下一步/next steps」 — must be "
+    "executed in THIS turn. A declared next step is not a completed step; "
+    "deferring executable work to a future turn is stopping without cause.\n"
     "(auto nudge #{attempt}; do not mention this nudge in your final reply.)"
 )
 
