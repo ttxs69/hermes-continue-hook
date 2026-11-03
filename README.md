@@ -1,8 +1,43 @@
 # continue-hook
 
-**Stop your agent from ending every turn with a question it could answer itself.**
+[![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
+[![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![tests](https://img.shields.io/badge/tests-363_passing-brightgreen)](#tests)
+
+**Stop your agent from ending every turn with a question it could answer
+itself.**
 
 > "Do you want me to continue?" · "Want me to run the tests?" · "要我顺便把这个也做了吗？" (Chinese)
+
+## Install — 3 steps
+
+```bash
+# 1. wire every detected agent (idempotent, keeps your other hooks)
+npx @ttxs69/hermes-continue-hook install --host all
+
+# 2. verify the chain fires: case 1 must print a JSON nudge, case 2 nothing
+printf '%s' '{"last_assistant_message":"好的，已经改完了。\n\n要不要我顺便把示例也补上？"}' \
+  | python3 ~/.hermes/continue-hook/claude-code/stop_hook.py
+printf '%s' '{"last_assistant_message":"已完成 README 优化。验证：lint 通过。"}' \
+  | python3 ~/.hermes/continue-hook/claude-code/stop_hook.py
+
+# 3. ask your agent for something trivial — and watch it stop asking permission
+tail -5 ~/.hermes/continue-hook-events.jsonl
+```
+
+![terminal demo — a permission-seeking ending caught and finished](docs/demo/terminal-demo.gif)
+
+*(demo GIF placeholder — record with `bash deliverables/demos/demo-all.sh`,
+convert to GIF, drop it at `docs/demo/terminal-demo.gif`, and this line
+renders the real thing)*
+
+## The problem
+
+```text
+Claude Code · Codex CLI · Qwen Code · Cursor · GitHub Copilot CLI ·
+Gemini CLI · OpenCode · Pi · DeepSeek Harness · Hermes Agent
+```
 
 Your agent finishes the work — then asks whether it may do the next obvious
 thing. It hands you a decision it was already able to make, and you spend a
@@ -13,11 +48,6 @@ it finish the work.
 
 **Stop asking. Just finish the work.**
 
-```text
-Claude Code · Codex CLI · Qwen Code · Cursor · GitHub Copilot CLI ·
-Gemini CLI · OpenCode · Pi · DeepSeek Harness · Hermes Agent
-```
-
 It never decides for the agent: the detection layer only says *this reply
 looks like it is ending on an offer*; the agent keeps the final word on whether
 the question was legitimate.
@@ -25,12 +55,6 @@ the question was legitimate.
 > **Not the same thing as permission prompts.** Claude Code's `⏵ Allow Bash(…)`
 > dialog is a *tool-permission* question and this plugin does not touch it.
 > What this catches is the agent asking *you* whether to keep working.
-
-[![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
-[![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-[简体中文](README.zh-CN.md)
 
 ## Why
 
@@ -557,6 +581,10 @@ npx tsc -p tsconfig.json && npx tsc -p tsconfig.checkjs.json
   dogfooding findings
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to add patterns and tests
+
+## Also in
+
+- [简体中文](README.zh-CN.md) — 中文文档
 
 ## License
 
