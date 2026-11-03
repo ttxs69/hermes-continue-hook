@@ -26,11 +26,10 @@ printf '%s' '{"last_assistant_message":"已完成 README 优化。验证：lint 
 tail -5 ~/.hermes/continue-hook-events.jsonl
 ```
 
-![terminal demo — a permission-seeking ending caught and finished](docs/demo/terminal-demo.gif)
+![terminal demo — a permission-seeking ending caught and finished](deliverables/demos/demo-all.gif)
 
-*(demo GIF placeholder — record with `bash deliverables/demos/demo-all.sh`,
-convert to GIF, drop it at `docs/demo/terminal-demo.gif`, and this line
-renders the real thing)*
+*(the existing four-segment recording; a dedicated first-screen clip —
+`bash deliverables/demos/demo-all.sh`, terminal → GIF — can replace it later)*
 
 ## The problem
 

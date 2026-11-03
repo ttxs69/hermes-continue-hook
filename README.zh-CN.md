@@ -1,8 +1,40 @@
 # continue-hook
 
+[![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
+[![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![tests](https://img.shields.io/badge/tests-363_passing-brightgreen)](#测试)
+
 **别让你的 agent 每一轮都以一个它自己就能回答的问题收尾。**
 
 > "Do you want me to continue?" · "Want me to run the tests?" · "要我顺便把这个也做了吗？" (Chinese)
+
+## 三步安装
+
+```bash
+# 1. 给本机检测到的所有 agent 装上（幂等，不动你已有的 hooks）
+npx @ttxs69/hermes-continue-hook install --host all
+
+# 2. 验证整条链路真的会触发：第 1 条必须打印 JSON nudge，第 2 条什么都不打印
+printf '%s' '{"last_assistant_message":"好的，已经改完了。\n\n要不要我顺便把示例也补上？"}' \
+  | python3 ~/.hermes/continue-hook/claude-code/stop_hook.py
+printf '%s' '{"last_assistant_message":"已完成 README 优化。验证：lint 通过。"}' \
+  | python3 ~/.hermes/continue-hook/claude-code/stop_hook.py
+
+# 3. 随手让 agent 做件小事——看它是否还会来问许可
+tail -5 ~/.hermes/continue-hook-events.jsonl
+```
+
+![terminal demo — a permission-seeking ending caught and finished](deliverables/demos/demo-all.gif)
+
+*（现有四段演示录屏；之后可用 `bash deliverables/demos/demo-all.sh` 录一段首屏专用片段替换）*
+
+## 问题所在
+
+```text
+Claude Code · Codex CLI · Qwen Code · Cursor · GitHub Copilot CLI ·
+Gemini CLI · OpenCode · Pi · DeepSeek Harness · Hermes Agent
+```
 
 你的 agent 把活干完了——然后还要问一句，能不能顺手做下一件显而易见的事。它把一个
 自己本来就能做的决定丢给你，你却要花一整个 turn 回一个词。忙起来的一天，这就是几十次
@@ -12,22 +44,11 @@ continue-hook 会抓住这种结尾，让 agent 重新自查一遍，然后放�
 
 **别再问了，直接把活干完。**
 
-```text
-Claude Code · Codex CLI · Qwen Code · Cursor · GitHub Copilot CLI ·
-Gemini CLI · OpenCode · Pi · DeepSeek Harness · Hermes Agent
-```
-
 它从不替 agent 做决定：检测层只负责指出*这条回复看起来是以一句提议收尾的*；这个
 问句该不该问，最终还是 agent 自己说了算。
 
 > **这跟权限确认框不是一回事。** Claude Code 的 `⏵ Allow Bash(…)` 对话框问的是
 > *工具权限*，这个插件完全不碰它。这里拦的是 agent 反过来问*你*要不要继续干。
-
-[![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
-[![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-[English](README.md)
 
 ## 为什么要做这个
 
@@ -502,6 +523,10 @@ npx tsc -p tsconfig.json && npx tsc -p tsconfig.checkjs.json
 - [`docs/DESIGN.md`](docs/DESIGN.md) —— 架构调研、评估过的 12 种方案、自己用下来的结论
 - [`CHANGELOG.md`](CHANGELOG.md) —— 更新日志
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 如何新增模式与测试
+
+## 其他语言
+
+- [English](README.md) —— 英文版文档
 
 ## 许可证
 
