@@ -34,7 +34,33 @@ DISPATCHED_TRIGGERS = frozenset(
     {"promise", "offer", "hand_off", "confirm_seek", "question_mark", "unverified_claim"}
 )
 
-__all__ = ["DEFAULTS", "ConfigStore", "build_nudge", "default_config", "detect"]
+# ── 产物级证据完整性（evidence_complete，2026-11-05）──────────────────────
+# ⚠ 这是**产物级**检查，不是 reply-tail 触发器，所以它不在 `triggers` 里、
+#   也不在 DISPATCHED_TRIGGERS 里 —— `detect()` 只看一条回复的收尾
+#   ≤tail_chars 字符，而这一项要看「产物 + 判决」两份**整文件**。
+#   硬塞进 triggers 会让 TestTriggerDispatchIsReal 的见证句断言变成假绿
+#   （detect() 根本看不见文件，见证句无从写起）。它有自己的入口
+#   `check_evidence_complete()` 和配置命名空间 `artifact_evidence`。
+#
+# 三项里两项自判、一项转交：
+#   · 判据出处：某一行同时有判据词与**可追溯锚点**（路径 / URL / §编号 /
+#     L<行号> / 源文件名）——「有判据」和「判据有出处」是两件事
+#   · 命令凭据：某一行同时有命令调用与**执行回执**（复用 _CREDENTIAL_RE：
+#     rc= / exit 码 / 围栏 / 哈希）——「提了命令」和「命令真跑过」是两件事
+#   · 四测结论台：**不在这里重新解析**。PG 表格形状判定的唯一实现是
+#     evolve_gate.parse_pg_conclusion；两套 PG 判定必然漂移。调用方把它的
+#     问题清单传进来（pg_missing），本函数只负责汇总点名。
+EVIDENCE_ITEMS = ("四测结论台", "判据出处", "命令凭据")
+
+__all__ = [
+    "DEFAULTS",
+    "EVIDENCE_ITEMS",
+    "ConfigStore",
+    "build_nudge",
+    "check_evidence_complete",
+    "default_config",
+    "detect",
+]
 
 # Quoted spans are *mentions* of a phrase, not *uses* of it. Trigger matching
 # runs on the quote-stripped tail (found via live dogfooding: a report that
@@ -65,6 +91,7 @@ _INLINE_CODE_RE = re.compile(r"`[^`\n]{1,120}`")
 # 同消息前文出现过不算（见 NUDGE_TEMPLATE 第 5 条）。
 _CREDENTIAL_RE = re.compile(
     r"```"  # a fenced block — the command+output shape is itself evidence
+    r"|\brc\s*=\s*\d+"  # rc=0 / rc = 78 — what this repo actually writes
     r"|exit[\s_-]*(?:code[\s_=-]*)?\d+"  # exit 0 / exit_code=1 / exitcode 2
     r"|退出码\s*\d+"  # the same, in Chinese
     r"|\b[0-9a-f]{7,}\b"  # ≥7-hex hash (git short sha and longer)
@@ -137,7 +164,7 @@ DEFAULTS: dict = {
     # "per turn" means per turn — not per session (the old implementation never
     # reset it, so two nudges silenced the hook for the rest of the session).
     "max_nudges_per_turn": 2,
-    "max_nudges_per_session": 20,  # backstop for hosts without a host-side cap
+    "max_nudges_per_session": -1,  # v1.6.0: OFF by default — lifetime caps disarm the hook in long sessions; set >0 to re-enable
     # Optional session-level rate limit between two nudges. Disabled by default:
     # the caps above already bound the loop, and a non-zero value silently
     # stops the hook from working for minutes after the first nudge.
@@ -165,6 +192,13 @@ DEFAULTS: dict = {
             # 中英混排无空格（红队实测「下一步I'll check the logs」原先漏检）
             r"下一步\s*I(?:'|’)ll\b",
             r"接下来[：:，,、]?\s*我(会|要|将|去|来|就|打算|准备)",
+            # 2026-11-13 生产实录两条漏检（主会话 18:19 skip no_trigger，
+            # snippet=「下一个动作我已经排好：清那 148 条无效账」；同日更早
+            # 「下一轮做进包里发版」也未触发）：
+            #   「下一轮」型推迟——不定式承诺，无第一人称也能构成安排
+            r"下一轮[：:，,]?\s*(我)?(再|来|去|做|修|发|补|跑|查|改)",
+            #   「已排好」型——宣布未来工作已安排（回顾无此形状：「上一轮我做了」不受影响）
+            r"下(一?个)?(动作|步骤|件事)[：:，,]?\s*我?已(经)?(排好|安排好?|准备好|想好)",
             # 承接词 + 第一人称（「然后我就去拉数据」「接着我来跑」）
             r"(然后|接着|之后|随后)我(就)?(去|来|会|要)(查|看|做|写|改|跑|验|测|读|拉|试|补|算|加|核对)",
             # 「稍后/待会」也是承诺的常见说法。
@@ -252,6 +286,53 @@ DEFAULTS: dict = {
                 "passed",
             ],
         },
+    },
+    # ── 产物级证据完整性（evidence_complete）────────────────────────────
+    # 与上面的 `triggers` **分开**：那几张表判的是「一条回复的收尾形状」，
+    # 这张判的是「产物 + 判决两份文件的证据项齐不齐」。混在一起会让
+    # detect() 的见证句纪律失去意义（见文件头 EVIDENCE_ITEMS 的注释）。
+    #
+    # 判据都是**形状**（R120：门只验「在不在」，不验「对不对」）：
+    #   · 判据出处 = 判据词 + 可追溯锚点**同一行**
+    #   · 命令凭据 = 命令调用 + 执行回执**同一行**（回执复用 _CREDENTIAL_RE）
+    # 四测结论台不在这里判 —— 唯一实现是 evolve_gate.parse_pg_conclusion。
+    "artifact_evidence": {
+        "enabled": True,
+        # 判据词：说明「凭什么这么判」。
+        "criterion_words": [
+            r"判据",
+            r"判定口径",
+            r"判线",
+            r"阈值",
+            r"门槛",
+            r"口径",
+        ],
+        # 出处锚点：说明「这条判据写在哪」。缺锚点 = 判据无法追溯。
+        "anchor_words": [
+            r"https?://",  # URL
+            r"\bstate/",  # 仓内路径
+            r"\btools/",
+            r"\bcontent/",
+            r"\bproducts/",
+            r"§\s*\d+",  # 章节号
+            r"\bL\d+\b",  # 行号
+            r"\.(?:md|py|json|jsonl|csv)\b",  # 源文件名/扩展名
+        ],
+        # 命令调用：说明「跑了什么」。
+        "command_words": [
+            r"python3?\s",
+            r"\bbash\s",
+            r"\$\s",
+            r"\bgrep\s",
+            r"\bnpm\s",
+            r"\bmake\s",
+            r"\bsh\s",
+            r"\bjq\s",
+            r"\bcurl\s",
+            r"\.py\b",
+        ],
+        # 结果回执沿用 _CREDENTIAL_RE（rc= / exit 码 / 围栏 / 哈希/[未查证]），
+        # 不在这里重复定义 —— 两处正则必然漂移。
     },
     # Exclusions: any hit short-circuits to skip — legitimate asks and real
     # blockers. Better to miss a nudge than to interrupt a real question.
@@ -425,6 +506,71 @@ def _completion_words_re(value: Any) -> re.Pattern | None:
     if not pats:
         return None
     return re.compile("|".join(f"(?:{p})" for p in pats), re.IGNORECASE)
+
+def _any_line_has(text: str, *patterns: re.Pattern) -> bool:
+    """True when SOME single line matches every one of ``patterns``.
+
+    同行判据是有意的：判据词在标题、出处锚点在三百行外，等于「凭感觉判」。
+    跨行匹配会把「文中某处出现过 state/ 路径」算成「这条判据有出处」——
+    那正是这道门要拦的东西。
+    """
+    return any(all(p.search(line) for p in patterns) for line in text.splitlines())
+
+def check_evidence_complete(
+    artifact_text: str,
+    verdict_text: str,
+    cfg: dict | None = None,
+    pg_missing: list | None = None,
+) -> list[str]:
+    """产物 + 判决这一对文件的「证据完整性」。返回缺失项说明清单（空 = 齐备）。
+
+    三项（EVIDENCE_ITEMS），只判**形状在不在**，不判内容对不对（R120）：
+
+      ① 四测结论台 —— 由调用方把 PG 解析问题清单传进来（``pg_missing``）。
+         这里**不重新解析** PG 表：唯一实现是 evolve_gate.parse_pg_conclusion，
+         两份 PG 判定必然漂移。``None`` = 调用方没有解析器 ⇒ 记「未评估」，
+         **不算齐备**（不可判≠通过）。
+      ② 判据出处 —— 某一行同时有判据词与可追溯锚点（路径/URL/§/L<n>/源文件名）。
+         「有判据」和「判据有出处」是两件事。
+      ③ 命令凭据 —— 某一行同时有命令调用与执行回执（复用 ``_CREDENTIAL_RE``：
+         rc= / exit 码 / 围栏 / ≥7-hex / [未查证]）。
+         「提了命令」和「命令真跑过」是两件事。
+
+    检查范围是**产物 + 判决的并集**（契约写的就是「产物/判决文件」）：
+    证据写在判决里、产物本身是正文（如公众号草稿），是这份仓的正常形态；
+    要求产物正文自带 rc= 会把五份已过审的草稿全部误红。
+    """
+    conf = (cfg if cfg is not None else default_config()).get("artifact_evidence") or {}
+    if conf.get("enabled", True) is False:
+        return []
+
+    both = f"{artifact_text or ''}\n{verdict_text or ''}"
+    missing: list[str] = []
+
+    # ① 四测结论台：只汇总调用方的解析结果，不自己判。
+    if pg_missing is None:
+        missing.append("四测结论台：未评估（调用方未提供 PG 四测结论台解析结果）⇒ 不可判，不算齐备")
+    elif pg_missing:
+        missing.append("四测结论台：" + "；".join(str(x) for x in pg_missing))
+
+    # ② 判据出处：判据词 + 出处锚点同一行。
+    crit = _compile(conf.get("criterion_words"))
+    anchor = _compile(conf.get("anchor_words"))
+    if not _any_line_has(both, crit, anchor):
+        missing.append(
+            "判据出处：没有任何一行同时给出判据（判据/口径/阈值/门槛…）与可追溯锚点"
+            "（路径 / URL / 章节号 / 行号 / 源文件名）——『有判据』不等于『判据有出处』"
+        )
+
+    # ③ 命令凭据：命令调用 + 执行回执同一行（回执复用 _CREDENTIAL_RE）。
+    cmd = _compile(conf.get("command_words"))
+    if not _any_line_has(both, cmd, _CREDENTIAL_RE):
+        missing.append(
+            "命令凭据：没有任何一行同时给出命令与执行回执"
+            "（`rc=` / exit 码 / 围栏 / 哈希）——『提了命令』不等于『命令真跑过』"
+        )
+
+    return missing
 
 def detect(text: str, attempt: int, cfg: dict) -> tuple[bool, str]:
     """Return ``(should_nudge, reason_code)``. Pure transport layer.
@@ -874,8 +1020,15 @@ def _cap_reason(
         max_per_turn = int(_num(cfg.get("max_nudges_per_turn", 2), 2, integer=True))
         if attempt >= max_per_turn:
             return "max_nudges"
-    max_per_session = int(_num(cfg.get("max_nudges_per_session", 20), 20, integer=True))
-    if total >= max_per_session:
+    # 2026-11-13 (v1.6.0): the lifetime session cap is OFF by default.
+    # In long-lived sessions (days, not hours) a lifetime total permanently
+    # disarms the hook after 20 *successful* nudges — the protection dies
+    # exactly when the session needs it most. Per-turn (2) already bounds
+    # every loop; a cross-turn self-sustaining loop does not exist (each
+    # turn is driven by real input). Set max_nudges_per_session explicitly
+    # (>0) to re-enable it as a backstop for hosts without a host-side cap.
+    legacy = int(_num(cfg.get("max_nudges_per_session", -1), -1, integer=True))
+    if legacy > 0 and total >= legacy:
         return "max_nudges_per_session"
     cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
     if cooldown > 0 and total > 0 and now - last_ts < cooldown:

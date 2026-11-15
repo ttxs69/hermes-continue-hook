@@ -1,6 +1,6 @@
 {
   "name": "@ttxs69/hermes-continue-hook",
-  "version": "1.5.1",
+  "version": "1.6.1",
   "description": "Stop hook for AI coding agents: catches \"want me to continue?\" endings the agent could decide itself, nudges a self-check, and only asks when it should. Claude Code, Codex, Cursor, Copilot CLI, Gemini CLI, OpenCode, and more. MIT.",
   "keywords": [
     "claude-code",

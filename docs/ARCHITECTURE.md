@@ -72,7 +72,7 @@ end a turn several times inside it, when a blocking hook makes it continue.
 * A turn that ends **without** a nudge closes the chain and resets `count`, so
   the next turn starts fresh.
 * `total` counts the nudges in the session and is bounded by
-  `max_nudges_per_session` — the backstop for hosts with no host-side cap
+  `max_nudges_per_session` — optional backstop for hosts with no host-side cap; OFF by default since v1.6.0 (a lifetime cap permanently disarms the hook in long-lived sessions after 20 *successful* nudges — per-turn caps already bound every loop)
   (DeepSeek Harness, Cursor).
 * `cooldown_seconds` is an optional session-level rate limit, **off by
   default**: the caps already bound the loop, and a non-zero value silently

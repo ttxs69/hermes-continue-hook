@@ -135,7 +135,7 @@ cat > ~/.hermes/continue_hook.json <<'JSON'
   "enabled": true,
   "dry_run": false,
   "max_nudges_per_turn": 2,
-  "max_nudges_per_session": 20
+  "max_nudges_per_session": -1
 }
 JSON
 ```
@@ -238,7 +238,7 @@ agent turn ends with "…Want me to continue?"
 | `enabled` | `true` | 总开关 |
 | `dry_run` | `false` | 只记日志的试运行：记录*本来会*触发什么，什么都不注入 |
 | `max_nudges_per_turn` | `2` | 一个 turn 内允许的 nudge 次数（turn 干净结束时会重置） |
-| `max_nudges_per_session` | `20` | 给那些没有 host 侧上限的 host 兜底（DeepSeek Harness、Cursor） |
+| `max_nudges_per_session` | `-1`（关） | v1.6.0 起默认关闭：终身总量在长会话里=20 次成功推动后永久缴械（防线的保质期短于战场）；每回合 2 次已封顶所有循环。需要兜底时显式设 >0（DeepSeek Harness、Cursor 等无 host 侧上限的场景） |
 | `cooldown_seconds` | `0`（关闭） | 可选：同一个 session 内两次 nudge 之间的最小间隔 |
 | `tail_chars` | `240` | 只检查结尾的 N 个字符 |
 | `triggers.offer` | — | 第一人称提议：`要不要我`, `需要我…做吗`, `should i`, `want me to` |

@@ -11,7 +11,7 @@ One file, shared by every host:
   "enabled": true,                 // false disables every host at once
   "dry_run": false,                // log what would fire, never nudge
   "max_nudges_per_turn": 2,        // nudges along one turn's chain
-  "max_nudges_per_session": 20,    // backstop for hosts without a host-side cap
+  "max_nudges_per_session": -1,    // v1.6.0: OFF by default — lifetime caps disarm the hook in long sessions; set >0 to re-enable the backstop
   "cooldown_seconds": 0,           // optional session-level rate limit (off)
   "tail_chars": 240,               // how much of the reply is inspected
 

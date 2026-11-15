@@ -147,7 +147,7 @@ cat > ~/.hermes/continue_hook.json <<'JSON'
   "enabled": true,
   "dry_run": false,
   "max_nudges_per_turn": 2,
-  "max_nudges_per_session": 20
+  "max_nudges_per_session": -1
 }
 JSON
 ```
@@ -259,7 +259,7 @@ decided by the agent, inside the nudge. Patterns are plain configurable regexes
 | `enabled` | `true` | Master switch |
 | `dry_run` | `false` | Log-only rollout: record what *would* fire, inject nothing |
 | `max_nudges_per_turn` | `2` | Nudges allowed along one turn (resets when a turn ends cleanly) |
-| `max_nudges_per_session` | `20` | Backstop for hosts without a host-side cap (DeepSeek Harness, Cursor) |
+| `max_nudges_per_session` | `-1` (off) | OFF by default since v1.6.0: a lifetime cap permanently disarms the hook in long-lived sessions after 20 *successful* nudges; per-turn caps already bound every loop. Set >0 for hosts with no host-side cap (DeepSeek Harness, Cursor) |
 | `cooldown_seconds` | `0` (off) | Optional minimum gap between two nudges in a session |
 | `tail_chars` | `240` | Only inspect the closing N characters |
 | `triggers.offer` | — | First-person offers: `要不要我`, `需要我…做吗`, `should i`, `want me to` |
