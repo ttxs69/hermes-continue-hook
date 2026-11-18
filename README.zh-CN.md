@@ -213,6 +213,16 @@ hook 只是*让 agent 再看一眼*。那个问题该不该问，依然由 agent
 53% 的命中率说明 agent 确实差不多每隔一轮就会用一个求许可的问句收尾——这正是这个
 工具要解决的问题。真正重要的是那些 `boundary` 跳过：那些是该问的时候问了。
 
+
+## 拦到了一次假「已完成」？讲讲那一次
+
+这个 hook 在造它的那台机器上 **23 天拦了 191 次「说做完了但没做」**。
+如果你的 agent 也骗过你——**开个 issue 讲讲那次具体事故**（哪个任务、它宣称了什么、你怎么发现的）。
+真实事故决定修复优先级：https://github.com/ttxs69/hermes-continue-hook/issues
+
+想轻聊？用 Discussions：
+https://github.com/ttxs69/hermes-continue-hook/discussions
+
 ## 它是怎么工作的
 
 ```

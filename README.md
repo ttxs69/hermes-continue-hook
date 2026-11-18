@@ -233,6 +233,17 @@ a permission-seeking question — that is the problem this exists for. The
 `boundary` skips are the important ones: they are the cases where asking
 was correct.
 
+
+## Caught a lie? Tell me about that one time
+
+This hook caught **191 false "done" claims in 23 days** on the machine it was built on.
+If your agent has fooled you too — **open an issue describing that specific incident**
+(which task, what it claimed, how you found out). Real incidents set the fix priority:
+https://github.com/ttxs69/hermes-continue-hook/issues
+
+Prefer something lighter? Use Discussions:
+https://github.com/ttxs69/hermes-continue-hook/discussions
+
 ## How it works
 
 ```
