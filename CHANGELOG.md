@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.2 (2026-11-18)
+
+### Added
+- **User-loop entry (bilingual README)** — a "Caught a lie? Tell me about that
+  one time" section: 2,316 npm downloads and zero user conversations meant the
+  tool was flying blind. The section asks for the specific incident (which
+  task, what the agent claimed, how it was discovered) — not "do you like it".
+  Issues and Discussions are both linked.
+
 ## 1.6.1 (2026-11-13)
 
 ### Added（补记，2026-11-15 红队抓漏）
