@@ -408,8 +408,15 @@ def _cap_reason(
         max_per_turn = int(_num(cfg.get("max_nudges_per_turn", 2), 2, integer=True))
         if attempt >= max_per_turn:
             return "max_nudges"
-    max_per_session = int(_num(cfg.get("max_nudges_per_session", 20), 20, integer=True))
-    if total >= max_per_session:
+    # 2026-11-13 (v1.6.0): the lifetime session cap is OFF by default.
+    # In long-lived sessions (days, not hours) a lifetime total permanently
+    # disarms the hook after 20 *successful* nudges — the protection dies
+    # exactly when the session needs it most. Per-turn (2) already bounds
+    # every loop; a cross-turn self-sustaining loop does not exist (each
+    # turn is driven by real input). Set max_nudges_per_session explicitly
+    # (>0) to re-enable it as a backstop for hosts without a host-side cap.
+    legacy = int(_num(cfg.get("max_nudges_per_session", -1), -1, integer=True))
+    if legacy > 0 and total >= legacy:
         return "max_nudges_per_session"
     cooldown = _num(cfg.get("cooldown_seconds", 0) or 0, 0, integer=False)
     if cooldown > 0 and total > 0 and now - last_ts < cooldown:

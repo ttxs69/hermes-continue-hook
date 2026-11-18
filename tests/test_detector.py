@@ -168,7 +168,9 @@ class TestPromiseFalsePositiveBudget(unittest.TestCase):
     # 全部是「不该被拦」的真实回复形态（中英文、长短、代码、数据、引用、已完成）
     NEGATIVE: ClassVar[list[str]] = [
         "## Summary\nThe migration completed. 12 tables updated.\n\n## Next steps\n1. Monitor error rates\n2. Update the runbook",
-        "Done. Next steps: review the diff and merge.",
+        # 2026-11-02：完成断言必须同段带凭据 —— 这三条原句没有凭据，
+        # 在新策略下**该**被 nudge，所以补上 exit 码，保持它们「合法报告」的地位。
+        "Done — build exit 0. Next steps: review the diff and merge.",
         "The next step needs your decision on the pricing tier.",
         "Implemented all three items.\n\nTODO (for you):\n- approve the deploy\n- rotate the key",
         "下一步是把它部署到 staging。我已经部署完了，日志显示 healthy。",
@@ -189,10 +191,10 @@ class TestPromiseFalsePositiveBudget(unittest.TestCase):
         'The plan you wrote says "then I\'ll deploy". I only did the build.',
         "好，收到。",
         "跑完了，结果如上。",
-        "Done - all 325 tests pass.",
+        "Done - all 325 tests pass (exit 0).",
         "下一步需要你决定用哪个方案，A 还是 B。",
         "下一步要 API key，你把 key 发我我就跑。",
-        "本次排查完成。根因是 ruff 的 exclude 对显式文件路径不生效。已修 hook。",
+        "本次排查完成。根因是 ruff 的 exclude 对显式文件路径不生效。已修 hook，复跑 exit 0。",
         "Root cause found: the formatter skips the exclude list for explicit paths.",
         "步骤：1. 读数据 2. 分类 3. 写结论。三个都做完了。",
         "I checked the next release notes; nothing breaking.",
@@ -299,6 +301,10 @@ class TestTriggerDispatchIsReal(unittest.TestCase):
         "hand_off": "剩下的就交给你决定。",
         "confirm_seek": "这样可以吗，我不确定。",
         "question_mark": "要我现在就跑吗？",
+        # 2026-11-02 第 6 个触发器：完成断言 + 收尾段无验证凭据。
+        # ⚠ 见证句不能自带凭据（围栏/exit 码/哈希/[未查证]），否则它就是
+        # no_trigger，这个键等于没被证明 —— 那正是 S6 抓过的测试剧场。
+        "unverified_claim": "迁移已完成，全部搞定。",
     }
 
     def test_every_configured_trigger_has_a_witness(self):
@@ -517,7 +523,9 @@ class TestDetectZh(unittest.TestCase):
         self.case("卡在实名认证，需要你先完成。", False)
 
     def test_declarative_done(self):
-        self.case("已完成，验证通过。", False)
+        # 2026-11-02：光说「已完成，验证通过」不再放行 —— 完成断言必须带
+        # 凭据（triggers.unverified_claim）。带 exit 码的版本仍是 declarative done。
+        self.case("已完成，验证通过，`pytest -q` exit 0。", False)
 
     def test_normal_report(self):
         self.case("交付：A 已上线，B 待数据。剩余风险：C。", False)
@@ -556,7 +564,9 @@ class TestDetectEn(unittest.TestCase):
         self.case("Should I go ahead and publish this?", True)
 
     def test_done(self):
-        self.case("Done. All tests pass.", False)
+        # 2026-11-02：无凭据的 "Done. All tests pass." 现在触发 unverified_claim
+        # （完成断言必须同段带凭据）；带 exit 码的 done 仍放行。
+        self.case("Done. All tests pass (exit 0).", False)
 
     def test_the_english_boundaries_are_as_wide_as_the_chinese_ones(self):
         """Every one of these is user-only: money, credentials, destruction,
@@ -980,6 +990,102 @@ class TestBoundaryOnlyAppliesToPushBackEndings(unittest.TestCase):
             got, reason = detect(text, 0, self.CFG)
             self.assertTrue(got, f"promise guard lost ({reason}): {text!r}")
             self.assertEqual(reason, "trigger:promise", text)
+
+
+class TestUnverifiedClaim(unittest.TestCase):
+    """第 6 个触发器（2026-11-02 用户指令）：收尾段的完成断言必须自带凭据。
+
+    背景：用户一天 5 次抓到「宣布完成未验证」。事后扫描无效 —— 伤害在
+    宣布那一刻已经发生，唯一的预送达干预点就是这个停止闸。判形状不判意思：
+    收尾（tail_chars 窗口、剥引用后）里**同时**出现
+      ① 完成词（词表在 triggers.unverified_claim.completion_words，可改）
+      ② 且看不到任何验证凭据（``` 围栏 / exit 码 / ≥7 位十六进制哈希 / [未查证]）
+    ⇒ nudge。凭据在同消息前文**不算** —— 必须能在收尾段直接看到。
+    """
+
+    CFG: ClassVar[dict] = default_config()
+
+    def case(self, text, expect, note=""):
+        got, reason = detect(text, 0, self.CFG)
+        self.assertEqual(got, expect, f"{note} {text!r} -> {reason}")
+        return reason
+
+    def test_bare_completion_claim_fires(self):
+        """红：无凭据的完成断言必须触发（中英文都要召回）。"""
+        for s in (
+            "迁移已完成，全部搞定。",
+            "The bug is fixed. All good.",
+            "已验证，可以上线。",
+            "已推到远端。",
+        ):
+            reason = self.case(s, True, "unverified completion claim")
+            self.assertEqual(reason, "trigger:unverified_claim", s)
+
+    def test_evidence_earlier_in_the_message_does_not_count(self):
+        """红：凭据在同消息**前文**、收尾段看不到 ⇒ 仍触发。"""
+        head = (
+            "```bash\n$ pytest -q\n325 passed in 4.1s\n```\n"
+            + "细节：本次改动覆盖 detector 与 hookctl 两层，回归三百二十五例，"
+            "覆盖率上升，没有新增跳过，与上一版相比差异都在预期内。" * 6 + "\n"
+        )
+        # 前文要足够长，凭据（围栏 / passed）确实被挤出 240 字符的收尾窗口。
+        self.assertGreater(len(head), self.CFG["tail_chars"])
+        text = head + "综上：修复已完成。"
+        self.assertNotIn("```", text[-self.CFG["tail_chars"] :])
+        got, reason = detect(text, 0, self.CFG)
+        self.assertTrue(got, f"closing claim without visible evidence: {reason}")
+        self.assertEqual(reason, "trigger:unverified_claim")
+
+    def test_closing_evidence_releases(self):
+        """绿：收尾段自带凭据（exit 码 / 哈希 / 围栏 / [未查证]）⇒ 放行。"""
+        for s in (
+            "修复已完成，`ruff check .` exit 0。",
+            "已推到 main，commit 3f9c2ab 与本地一致。",
+            "修复已完成：\n```\n$ pytest -q\n325 passed\n```\n就这些。",
+            "迁移已完成 [未查证]，明天补跑。",
+            "Done - all 325 tests pass, exit 0.",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertFalse(got, f"{s!r} -> {reason}")
+
+    def test_no_completion_word_releases(self):
+        """绿：收尾没有完成词 ⇒ 放行（没断言完成就不归这条管）。"""
+        for s in (
+            "我看了日志，没发现异常，先到这里。",
+            "Reading the logs now; nothing to report.",
+        ):
+            got, reason = detect(s, 0, self.CFG)
+            self.assertFalse(got, f"{s!r} -> {reason}")
+
+    def test_quoted_completion_word_is_a_mention(self):
+        """引用里的完成词不算断言（匹配前先剥引用）。"""
+        got, reason = detect("文档里写着「已完成」，但那是上一版的原话。", 0, self.CFG)
+        self.assertFalse(got, reason)
+
+    def test_words_are_configurable(self):
+        """词表存配置：换词表 ⇒ 换一组词触发；置 false ⇒ 整条关闭。"""
+        cfg = default_config()
+        cfg["triggers"]["unverified_claim"]["completion_words"] = ["搞定"]
+        self.assertFalse(detect("迁移已完成。", 0, cfg)[0])
+        self.assertEqual(detect("迁移搞定。", 0, cfg), (True, "trigger:unverified_claim"))
+        cfg["triggers"]["unverified_claim"] = False
+        self.assertFalse(detect("迁移搞定。", 0, cfg)[0])
+
+    def test_nudge_template_item5_is_present(self):
+        """护栏文案第 5 条：完成断言必须同段带凭据 —— 删了它这条必红。"""
+        from detector import NUDGE_TEMPLATE
+
+        low = NUDGE_TEMPLATE.lower()
+        # 每个完成断言都要凭据，凭据形状说清楚
+        self.assertIn("verification evidence", low)
+        self.assertIn("in the same closing section", low)
+        self.assertIn("exit code", low)
+        self.assertIn("hash", low)
+        # 前文凭据不算 —— 必须能在收尾段直接看到
+        self.assertIn("does not count", low)
+        self.assertIn("visible in the closing itself", low)
+        # 没凭据的两条出路：补验证 / 标 [未查证]
+        self.assertIn("[未查证]", low)
 
 
 if __name__ == "__main__":

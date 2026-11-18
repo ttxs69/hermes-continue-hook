@@ -127,7 +127,8 @@ class TestDetectorCli(unittest.TestCase):
         self.assertTrue(out["should_nudge"])
 
     def test_declarative_ending_is_not_detected(self):
-        self.assertFalse(self._run("已完成，验证通过。")["should_nudge"])
+        # 2026-11-02：完成断言必须同段带凭据（triggers.unverified_claim）。
+        self.assertFalse(self._run("已完成，验证通过，`pytest -q` exit 0。")["should_nudge"])
 
     def test_a_user_approval_request_is_excluded(self):
         """「需要你批准」是第二人称请求 ⇒ user_must 放行。

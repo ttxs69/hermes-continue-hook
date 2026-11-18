@@ -27,7 +27,8 @@ sys.path.insert(0, str(REPO))
 import hookctl
 
 ASK = "要不要我顺便也把示例补上？"
-PLAIN = "已完成，42 项测试全绿。"
+# 2026-11-02：完成断言必须同段带凭据（triggers.unverified_claim），干净收尾要带 exit 码。
+PLAIN = "已完成，42 项测试全绿，exit 0。"
 
 
 class HomeCase(unittest.TestCase):

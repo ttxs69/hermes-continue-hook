@@ -1,0 +1,38 @@
+# GitHub 远端设置待办 —— push 时一并执行（topics 本身是远端操作，无法本地 commit）
+# 依据：~/moneymaker/state/exposure/distribution/github-discoverability.md
+#       P0-3（topics 14→20）+ P0-4（homepage 字段）
+# 数据均为 2026-11-03 GitHub API 实测。
+
+# 现有 14 topics（勿动，全部保留）：
+#   agent ai automation claude-code cli codex copilot-cli cursor
+#   deepseek-harness developer-tools gemini-cli hooks opencode stop-hook
+#
+# 新增 6 个 → 共 20（GitHub 官方上限 20，规范：小写连字符）：
+#   claude-code-hooks  → github.com/topics/claude-code-hooks 是 835 仓的真实 topic 页
+#   coding-agent       → awesome-claude-code (57k★) 等生态实测高频词
+#   agentic-coding     → 同上
+#   ai-coding-agent    → 搜索长尾
+#   qwen-code          → 已支持该宿主（enforce 级）但 topic 缺失
+#   llm                → 生态通用词
+
+# ── 1) 补 topics（gh repo edit，--add-topic 可重复）──────────────────────
+gh repo edit ttxs69/hermes-continue-hook \
+  --add-topic claude-code-hooks \
+  --add-topic coding-agent \
+  --add-topic agentic-coding \
+  --add-topic ai-coding-agent \
+  --add-topic qwen-code \
+  --add-topic llm
+
+# ── 2) Homepage 字段 → npm 包页（P0-4；npm 页就是产品页）────────────────
+gh repo edit ttxs69/hermes-continue-hook \
+  --homepage https://www.npmjs.com/package/@ttxs69/hermes-continue-hook
+
+# ── 3) 开启 Discussions（P0-5，无 gh 命令，网页操作）────────────────────
+#    Settings → General → Features → 勾选 Discussions（用默认分类模板）
+#    首个置顶 roadmap 帖文案：见同目录 github-discussions.md
+
+# ── 验证（github-discoverability.md「验证方式」节）──────────────────────
+gh repo view ttxs69/hermes-continue-hook --json repositoryTopics,homepageUrl
+#   期望：20 个 topics、homepage 指向 npm 包页
+#   GitHub 搜索 claude-code-hooks topic:claude-code-hooks 应能命中本仓

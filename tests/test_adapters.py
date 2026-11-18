@@ -31,7 +31,8 @@ HOOKS = {
     "qwen": ADAPTERS / "qwen" / "stop_hook.py",
 }
 ASK_ZH = "要不要我顺便也把示例补上？"
-PLAIN_ZH = "已完成，验证通过。"
+# 2026-11-02：完成断言必须同段带凭据（triggers.unverified_claim），干净收尾要带 exit 码。
+PLAIN_ZH = "已完成，验证通过，`pytest -q` exit 0。"
 BOUNDARY_ZH = "这会花 $69，需要你批准后我才买。"
 
 CLAUDE_STYLE = (
@@ -198,7 +199,9 @@ class TestCodexHook(unittest.TestCase):
         self.assertEqual(out, "")
 
     def test_declarative_allows_stop(self):
-        code, out = run_hook("codex", codex_payload(last_assistant_message="Done. Tests pass."))
+        code, out = run_hook(
+            "codex", codex_payload(last_assistant_message="Done. Tests pass (exit 0).")
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 

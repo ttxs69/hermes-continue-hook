@@ -147,7 +147,7 @@ class TestRegister(unittest.TestCase):
 
     def test_turn_end_declarative_no_inject(self):
         self.ctx.hooks["transform_llm_output"](
-            response_text="已完成，验证通过。", session_id="s2", model="m", platform="cli"
+            response_text="已完成，验证通过，exit 0。", session_id="s2", model="m", platform="cli"
         )
         self.ctx.hooks["on_session_end"](platform="cli", session_id="s2")
         self.assertEqual(self.ctx.injected, [])
@@ -174,7 +174,7 @@ class TestRegister(unittest.TestCase):
 
         # a turn that ends cleanly closes the chain
         self.ctx.hooks["transform_llm_output"](
-            response_text="已完成。", session_id="s4", model="m", platform="cli"
+            response_text="已完成，exit 0。", session_id="s4", model="m", platform="cli"
         )
         self.ctx.hooks["on_session_end"](platform="cli", session_id="s4")
         self.assertEqual(len(self.ctx.injected), 1)
@@ -227,7 +227,8 @@ class TestRegister(unittest.TestCase):
     def test_ch_test_command(self):
         out = self.ctx.commands["ch-test"]("要不要我继续？")
         self.assertIn("detect=True", out)
-        out = self.ctx.commands["ch-test"]("done.")
+        # 2026-11-02：裸 "done." 是无凭据完成断言，会触发 unverified_claim。
+        out = self.ctx.commands["ch-test"]("done, exit 0.")
         self.assertIn("detect=False", out)
 
     def test_hook_callbacks_accept_the_real_hermes_call_shape(self):

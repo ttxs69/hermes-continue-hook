@@ -1,8 +1,42 @@
 # continue-hook
 
-**Stop your agent from ending every turn with a question it could answer itself.**
+[![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
+[![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![tests](https://img.shields.io/badge/tests-363_passing-brightgreen)](#tests)
+
+**Stop your agent from ending every turn with a question it could answer
+itself.**
 
 > "Do you want me to continue?" · "Want me to run the tests?" · "要我顺便把这个也做了吗？" (Chinese)
+
+## Install — 3 steps
+
+```bash
+# 1. wire every detected agent (idempotent, keeps your other hooks)
+npx @ttxs69/hermes-continue-hook install --host all
+
+# 2. verify the chain fires: case 1 must print a JSON nudge, case 2 nothing
+printf '%s' '{"last_assistant_message":"好的，已经改完了。\n\n要不要我顺便把示例也补上？"}' \
+  | python3 ~/.hermes/continue-hook/claude-code/stop_hook.py
+printf '%s' '{"last_assistant_message":"已完成 README 优化。验证：lint 通过。"}' \
+  | python3 ~/.hermes/continue-hook/claude-code/stop_hook.py
+
+# 3. ask your agent for something trivial — and watch it stop asking permission
+tail -5 ~/.hermes/continue-hook-events.jsonl
+```
+
+![terminal demo — a permission-seeking ending caught and finished](deliverables/demos/demo-all.gif)
+
+*(the existing four-segment recording; a dedicated first-screen clip —
+`bash deliverables/demos/demo-all.sh`, terminal → GIF — can replace it later)*
+
+## The problem
+
+```text
+Claude Code · Codex CLI · Qwen Code · Cursor · GitHub Copilot CLI ·
+Gemini CLI · OpenCode · Pi · DeepSeek Harness · Hermes Agent
+```
 
 Your agent finishes the work — then asks whether it may do the next obvious
 thing. It hands you a decision it was already able to make, and you spend a
@@ -13,11 +47,6 @@ it finish the work.
 
 **Stop asking. Just finish the work.**
 
-```text
-Claude Code · Codex CLI · Qwen Code · Cursor · GitHub Copilot CLI ·
-Gemini CLI · OpenCode · Pi · DeepSeek Harness · Hermes Agent
-```
-
 It never decides for the agent: the detection layer only says *this reply
 looks like it is ending on an offer*; the agent keeps the final word on whether
 the question was legitimate.
@@ -25,12 +54,6 @@ the question was legitimate.
 > **Not the same thing as permission prompts.** Claude Code's `⏵ Allow Bash(…)`
 > dialog is a *tool-permission* question and this plugin does not touch it.
 > What this catches is the agent asking *you* whether to keep working.
-
-[![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
-[![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-[简体中文](README.zh-CN.md)
 
 ## Why
 
@@ -124,7 +147,7 @@ cat > ~/.hermes/continue_hook.json <<'JSON'
   "enabled": true,
   "dry_run": false,
   "max_nudges_per_turn": 2,
-  "max_nudges_per_session": 20
+  "max_nudges_per_session": -1
 }
 JSON
 ```
@@ -210,6 +233,17 @@ a permission-seeking question — that is the problem this exists for. The
 `boundary` skips are the important ones: they are the cases where asking
 was correct.
 
+
+## Caught a lie? Tell me about that one time
+
+This hook caught **191 false "done" claims in 23 days** on the machine it was built on.
+If your agent has fooled you too — **open an issue describing that specific incident**
+(which task, what it claimed, how you found out). Real incidents set the fix priority:
+https://github.com/ttxs69/hermes-continue-hook/issues
+
+Prefer something lighter? Use Discussions:
+https://github.com/ttxs69/hermes-continue-hook/discussions
+
 ## How it works
 
 ```
@@ -236,13 +270,14 @@ decided by the agent, inside the nudge. Patterns are plain configurable regexes
 | `enabled` | `true` | Master switch |
 | `dry_run` | `false` | Log-only rollout: record what *would* fire, inject nothing |
 | `max_nudges_per_turn` | `2` | Nudges allowed along one turn (resets when a turn ends cleanly) |
-| `max_nudges_per_session` | `20` | Backstop for hosts without a host-side cap (DeepSeek Harness, Cursor) |
+| `max_nudges_per_session` | `-1` (off) | OFF by default since v1.6.0: a lifetime cap permanently disarms the hook in long-lived sessions after 20 *successful* nudges; per-turn caps already bound every loop. Set >0 for hosts with no host-side cap (DeepSeek Harness, Cursor) |
 | `cooldown_seconds` | `0` (off) | Optional minimum gap between two nudges in a session |
 | `tail_chars` | `240` | Only inspect the closing N characters |
 | `triggers.offer` | — | First-person offers: `要不要我`, `需要我…做吗`, `should i`, `want me to` |
 | `triggers.hand_off` | — | Decision hand-offs: `你定`, `听你的`, `your call` |
 | `triggers.confirm_seek` | — | Confirmation-seeking: `这样可以吗`, `does this work` |
 | `triggers.question_mark` | `true` | Any `？/?` in the closing tail |
+| `triggers.unverified_claim` | see defaults | Completion words (`已修`, `搞定`, `done`, `fixed`, …) in the closing with no visible evidence (code fence / exit code / ≥7-hex hash / `[未查证]`) |
 | `exclusions.boundary` | — | User-only boundaries: money, identity, credentials, publishing, destructive actions |
 | `exclusions.user_must` | — | Second-person requests: only the user can supply/decide this |
 
@@ -398,7 +433,7 @@ bug would never have surfaced.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests   # 356 tests: detector, plugin, 9 adapters, dsh/pi contracts
+python3 -m unittest discover -s tests   # 363 tests: detector, plugin, 9 adapters, dsh/pi contracts
 npx vitest run                          # node suite (count per npm test output): OpenCode plugin, installer, lifecycle invariants, dsh
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
@@ -542,7 +577,7 @@ reason: the docs are hand-authored and reviewed by eye, and reflowing tables
 would be churn, not hygiene.
 
 ```bash
-python -m unittest discover -s tests     # 356 tests, no dependencies
+python -m unittest discover -s tests     # 363 tests, no dependencies
 python -m pytest --cov                   # same suite + coverage floor
 npx vitest run --coverage                # node suite + coverage floor (count per output)
 npx eslint . && npx prettier --check '**/*.{js,mjs,ts,json,yml}'
@@ -556,6 +591,10 @@ npx tsc -p tsconfig.json && npx tsc -p tsconfig.checkjs.json
   dogfooding findings
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to add patterns and tests
+
+## Also in
+
+- [简体中文](README.zh-CN.md) — 中文文档
 
 ## License
 

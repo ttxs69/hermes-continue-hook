@@ -663,7 +663,7 @@ it("an installed shell hook stays silent on a clean reply", () => {
     input: JSON.stringify({
       session_id: "e2e2",
       stop_hook_active: false,
-      last_assistant_message: "已完成，42 项测试全绿。",
+      last_assistant_message: "已完成，42 项测试全绿，exit 0。", // 2026-11-02: 完成断言需同段凭据
     }),
   });
   assert.strictEqual(out.trim(), "");

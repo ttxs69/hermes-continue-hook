@@ -98,7 +98,8 @@ class TestDetectorCli(unittest.TestCase):
         self.assertTrue(out["reason"].startswith("trigger:"))
 
     def test_declarative_ending_is_not_detected(self):
-        out = self._run("已完成，验证通过。")
+        # 2026-11-02：完成断言必须同段带凭据（triggers.unverified_claim）。
+        out = self._run("已完成，验证通过，`pytest -q` exit 0。")
         self.assertFalse(out["should_nudge"])
 
     def test_a_user_approval_request_is_excluded(self):

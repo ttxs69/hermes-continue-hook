@@ -100,7 +100,11 @@ class TestPatchModeStandalone(unittest.TestCase):
                 platform = "cli"
                 _continue_hook_nudges = 0
 
-            self.assertIsNone(module.continue_hook_nudge(Agent(), "已完成，42 项测试全绿。"))
+            # 2026-11-02：完成断言必须同段带凭据（triggers.unverified_claim），
+            # 所以干净收尾的载荷要带 exit 码。
+            self.assertIsNone(
+                module.continue_hook_nudge(Agent(), "已完成，42 项测试全绿，`pytest -q` exit 0。")
+            )
 
     def test_a_clean_environment_nudges_nothing(self):
         """Installing the patch must not start nudging by itself."""

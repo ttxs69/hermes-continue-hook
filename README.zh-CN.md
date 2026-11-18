@@ -1,8 +1,40 @@
 # continue-hook
 
+[![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
+[![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![tests](https://img.shields.io/badge/tests-363_passing-brightgreen)](#测试)
+
 **别让你的 agent 每一轮都以一个它自己就能回答的问题收尾。**
 
 > "Do you want me to continue?" · "Want me to run the tests?" · "要我顺便把这个也做了吗？" (Chinese)
+
+## 三步安装
+
+```bash
+# 1. 给本机检测到的所有 agent 装上（幂等，不动你已有的 hooks）
+npx @ttxs69/hermes-continue-hook install --host all
+
+# 2. 验证整条链路真的会触发：第 1 条必须打印 JSON nudge，第 2 条什么都不打印
+printf '%s' '{"last_assistant_message":"好的，已经改完了。\n\n要不要我顺便把示例也补上？"}' \
+  | python3 ~/.hermes/continue-hook/claude-code/stop_hook.py
+printf '%s' '{"last_assistant_message":"已完成 README 优化。验证：lint 通过。"}' \
+  | python3 ~/.hermes/continue-hook/claude-code/stop_hook.py
+
+# 3. 随手让 agent 做件小事——看它是否还会来问许可
+tail -5 ~/.hermes/continue-hook-events.jsonl
+```
+
+![terminal demo — a permission-seeking ending caught and finished](deliverables/demos/demo-all.gif)
+
+*（现有四段演示录屏；之后可用 `bash deliverables/demos/demo-all.sh` 录一段首屏专用片段替换）*
+
+## 问题所在
+
+```text
+Claude Code · Codex CLI · Qwen Code · Cursor · GitHub Copilot CLI ·
+Gemini CLI · OpenCode · Pi · DeepSeek Harness · Hermes Agent
+```
 
 你的 agent 把活干完了——然后还要问一句，能不能顺手做下一件显而易见的事。它把一个
 自己本来就能做的决定丢给你，你却要花一整个 turn 回一个词。忙起来的一天，这就是几十次
@@ -12,22 +44,11 @@ continue-hook 会抓住这种结尾，让 agent 重新自查一遍，然后放�
 
 **别再问了，直接把活干完。**
 
-```text
-Claude Code · Codex CLI · Qwen Code · Cursor · GitHub Copilot CLI ·
-Gemini CLI · OpenCode · Pi · DeepSeek Harness · Hermes Agent
-```
-
 它从不替 agent 做决定：检测层只负责指出*这条回复看起来是以一句提议收尾的*；这个
 问句该不该问，最终还是 agent 自己说了算。
 
 > **这跟权限确认框不是一回事。** Claude Code 的 `⏵ Allow Bash(…)` 对话框问的是
 > *工具权限*，这个插件完全不碰它。这里拦的是 agent 反过来问*你*要不要继续干。
-
-[![ci](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml/badge.svg)](https://github.com/ttxs69/hermes-continue-hook/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@ttxs69/hermes-continue-hook)](https://www.npmjs.com/package/@ttxs69/hermes-continue-hook)
-[![license: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-[English](README.md)
 
 ## 为什么要做这个
 
@@ -114,7 +135,7 @@ cat > ~/.hermes/continue_hook.json <<'JSON'
   "enabled": true,
   "dry_run": false,
   "max_nudges_per_turn": 2,
-  "max_nudges_per_session": 20
+  "max_nudges_per_session": -1
 }
 JSON
 ```
@@ -192,6 +213,16 @@ hook 只是*让 agent 再看一眼*。那个问题该不该问，依然由 agent
 53% 的命中率说明 agent 确实差不多每隔一轮就会用一个求许可的问句收尾——这正是这个
 工具要解决的问题。真正重要的是那些 `boundary` 跳过：那些是该问的时候问了。
 
+
+## 拦到了一次假「已完成」？讲讲那一次
+
+这个 hook 在造它的那台机器上 **23 天拦了 191 次「说做完了但没做」**。
+如果你的 agent 也骗过你——**开个 issue 讲讲那次具体事故**（哪个任务、它宣称了什么、你怎么发现的）。
+真实事故决定修复优先级：https://github.com/ttxs69/hermes-continue-hook/issues
+
+想轻聊？用 Discussions：
+https://github.com/ttxs69/hermes-continue-hook/discussions
+
 ## 它是怎么工作的
 
 ```
@@ -217,13 +248,14 @@ agent turn ends with "…Want me to continue?"
 | `enabled` | `true` | 总开关 |
 | `dry_run` | `false` | 只记日志的试运行：记录*本来会*触发什么，什么都不注入 |
 | `max_nudges_per_turn` | `2` | 一个 turn 内允许的 nudge 次数（turn 干净结束时会重置） |
-| `max_nudges_per_session` | `20` | 给那些没有 host 侧上限的 host 兜底（DeepSeek Harness、Cursor） |
+| `max_nudges_per_session` | `-1`（关） | v1.6.0 起默认关闭：终身总量在长会话里=20 次成功推动后永久缴械（防线的保质期短于战场）；每回合 2 次已封顶所有循环。需要兜底时显式设 >0（DeepSeek Harness、Cursor 等无 host 侧上限的场景） |
 | `cooldown_seconds` | `0`（关闭） | 可选：同一个 session 内两次 nudge 之间的最小间隔 |
 | `tail_chars` | `240` | 只检查结尾的 N 个字符 |
 | `triggers.offer` | — | 第一人称提议：`要不要我`, `需要我…做吗`, `should i`, `want me to` |
 | `triggers.hand_off` | — | 决策移交：`你定`, `听你的`, `your call` |
 | `triggers.confirm_seek` | — | 求确认：`这样可以吗`, `does this work` |
 | `triggers.question_mark` | `true` | 结尾部分出现任意 `？/?` |
+| `triggers.unverified_claim` | 见默认值 | 收尾段出现完成词（`已修`、`搞定`、`done`、`fixed` …）却看不到验证凭据（代码围栏 / exit 码 / ≥7 位十六进制哈希 / `[未查证]`） |
 | `exclusions.boundary` | — | 只有用户能拍板的边界：金钱、身份、凭据、发布、破坏性操作 |
 | `exclusions.user_must` | — | 第二人称请求：只有用户能提供或决定的事 |
 
@@ -363,7 +395,7 @@ python3 scripts/verify_claims.py     # 交叉核对三个脚本
 ## 测试
 
 ```bash
-python3 -m unittest discover -s tests   # 356 tests: detector, plugin, 9 adapters, dsh/pi contracts
+python3 -m unittest discover -s tests   # 363 tests: detector, plugin, 9 adapters, dsh/pi contracts
 npx vitest run                          # node 套件（条数以 npm test 输出为准）: OpenCode plugin, installer, lifecycle invariants, dsh
 bash adapters/dsh/typecheck.sh          # compiles the dsh plugin against @deepseek-ai/dsh-*
 ```
@@ -488,7 +520,7 @@ bug——一个并不存在的属性、一个被当 `Error` 读的 `unknown` 错
 制造无谓的改动，不是真正的整洁。
 
 ```bash
-python -m unittest discover -s tests     # 356 tests, no dependencies
+python -m unittest discover -s tests     # 363 tests, no dependencies
 python -m pytest --cov                   # same suite + coverage floor
 npx vitest run --coverage                # node 套件 + 覆盖率下限（条数以输出为准）
 npx eslint . && npx prettier --check '**/*.{js,mjs,ts,json,yml}'
@@ -501,6 +533,10 @@ npx tsc -p tsconfig.json && npx tsc -p tsconfig.checkjs.json
 - [`docs/DESIGN.md`](docs/DESIGN.md) —— 架构调研、评估过的 12 种方案、自己用下来的结论
 - [`CHANGELOG.md`](CHANGELOG.md) —— 更新日志
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 如何新增模式与测试
+
+## 其他语言
+
+- [English](README.md) —— 英文版文档
 
 ## 许可证
 

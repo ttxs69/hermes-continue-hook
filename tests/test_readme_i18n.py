@@ -190,6 +190,7 @@ class TestTheEnglishReadmeIsEnglish(unittest.TestCase):
         "triggers.offer",
         "triggers.hand_off",
         "triggers.confirm_seek",
+        "triggers.unverified_claim",
         "(Chinese)",
         "README.zh-CN.md",  # the language switch itself is named in Chinese
     )

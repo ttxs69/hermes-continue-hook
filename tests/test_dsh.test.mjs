@@ -245,8 +245,20 @@ it("permission-seeking ending steers one continuation", () => {
 });
 
 it("declarative ending does not steer", () => {
-  const steered = runTurn("已完成，验证通过。", { sessionId: "s2" });
+  const steered = runTurn("今天先到这里，明天继续。", { sessionId: "s2" });
   if (steered.length !== 0) throw new Error(`expected 0 steers, got ${steered.length}`);
+});
+
+// The 6th trigger (unverified_claim) supersedes the old expectation for bare
+// completion claims: 「已完成，验证通过。」 with no visible credential MUST
+// steer — that is the trigger's entire mandate (2026-11-02 user directive:
+// five "announced done, never verified" incidents in one day). A credential
+// in the same closing window releases it.
+it("bare completion claim steers; credential releases it", () => {
+  const bare = runTurn("已完成，验证通过。", { sessionId: "s2bare" });
+  if (bare.length !== 1) throw new Error(`expected 1 steer, got ${bare.length}`);
+  const evidenced = runTurn("已完成，验证通过。rc=0", { sessionId: "s2evid" });
+  if (evidenced.length !== 0) throw new Error(`expected 0 steers, got ${evidenced.length}`);
 });
 
 it("boundary question does not steer", () => {
