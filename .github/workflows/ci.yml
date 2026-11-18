@@ -162,6 +162,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+      # node 22 ships npm 10, whose arborist crashes on vitest 5's peer set
+      # ("Cannot read properties of null (reading 'edgesOut)", #loadPeerSet,
+      # fixed in npm 11). The job proves the *toolchain runs on node 22*; the
+      # npm major is not the thing under test — .nvmrc's node 24.22.1 ships
+      # npm 11.19, so this matches the one true toolchain, pinned exactly
+      # because "latest" is not a version (see CHANGELOG 1.3.2).
+      - name: Pin npm to the toolchain's major (node 22 ships npm 10)
+        if: matrix.node-version == '22'
+        run: npm install -g npm@11.19.1
       - name: Install dev tooling
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Vitest (OpenCode plugin, installer, lifecycle invariants)
